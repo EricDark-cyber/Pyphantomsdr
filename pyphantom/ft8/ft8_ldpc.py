@@ -1,11 +1,13 @@
-"""Décodeur LDPC FT8 avec matrice H complète (83 x 174).
+"""Decodeur LDPC(174,91) FT8 : matrice H canonique WSJT-X (83 x 174) + belief propagation.
 
-Matrice extraite de WSJT-X ldpc_174_91_c_reordered_parity.f90
+Matrice : ldpc_174_91_c_reordered_parity de WSJT-X (forme systematique :
+les 91 premiers bits du mot de code sont le message + CRC-14, les 83 derniers
+la parite). BP sum-product (tanh) avec decision dure et arret sur syndrome nul.
 """
 import numpy as np
 
-# Nm : 83 équations de parité, indices 1-origin (0 = padding)
-# Source : WSJT-X / SDRangel arrays.h
+# Nm : 83 equations de parite, indices 1-origin (0 = padding)
+# Source : WSJT-X ldpc_174_91_c_reordered_parity.f90
 NM = [
     [4, 31, 59, 91, 92, 96, 153],
     [5, 32, 60, 93, 115, 146, 0],
@@ -33,68 +35,63 @@ NM = [
     [20, 47, 70, 92, 138, 165, 0],
     [2, 48, 74, 113, 128, 160, 0],
     [21, 45, 78, 83, 117, 121, 151],
-    [22, 47, 58, 118, 129, 152, 0],
-    [23, 49, 66, 119, 132, 167, 0],
-    [24, 50, 69, 120, 133, 168, 0],
-    [25, 51, 72, 121, 134, 169, 0],
-    [26, 52, 75, 122, 135, 170, 0],
-    [27, 53, 78, 123, 136, 171, 0],
-    [28, 54, 81, 124, 137, 172, 0],
-    [29, 55, 84, 125, 138, 173, 0],
-    [30, 56, 87, 126, 139, 174, 0],
-    [31, 57, 90, 127, 140, 0, 0],
-    [32, 58, 93, 128, 141, 0, 0],
-    [33, 59, 96, 129, 142, 0, 0],
-    [34, 60, 99, 130, 143, 0, 0],
-    [35, 61, 102, 131, 144, 0, 0],
-    [36, 62, 105, 132, 145, 0, 0],
-    [37, 63, 108, 133, 146, 0, 0],
-    [38, 64, 111, 134, 147, 0, 0],
-    [39, 65, 114, 135, 148, 0, 0],
-    [40, 66, 117, 136, 149, 0, 0],
-    [41, 67, 120, 137, 150, 0, 0],
-    [42, 68, 123, 138, 151, 0, 0],
-    [43, 69, 126, 139, 152, 0, 0],
-    [44, 70, 129, 140, 153, 0, 0],
-    [45, 71, 132, 141, 154, 0, 0],
-    [46, 72, 135, 142, 155, 0, 0],
-    [47, 73, 138, 143, 156, 0, 0],
-    [48, 74, 141, 144, 157, 0, 0],
-    [49, 75, 144, 145, 158, 0, 0],
-    [50, 76, 147, 146, 159, 0, 0],
-    [51, 77, 150, 147, 160, 0, 0],
-    [52, 78, 153, 148, 161, 0, 0],
-    [53, 79, 156, 149, 162, 0, 0],
-    [54, 80, 159, 150, 163, 0, 0],
-    [55, 81, 162, 151, 164, 0, 0],
-    [56, 82, 165, 152, 165, 0, 0],
-    [57, 83, 168, 153, 166, 0, 0],
-    [58, 84, 171, 154, 167, 0, 0],
-    [59, 85, 174, 155, 168, 0, 0],
-    [60, 86, 0, 156, 169, 0, 0],
-    [61, 87, 0, 157, 170, 0, 0],
-    [62, 88, 0, 158, 171, 0, 0],
-    [63, 89, 0, 159, 172, 0, 0],
-    [64, 90, 0, 160, 173, 0, 0],
-    [65, 91, 0, 161, 174, 0, 0],
-    [66, 92, 0, 162, 0, 0, 0],
-    [67, 93, 0, 163, 0, 0, 0],
-    [68, 94, 0, 164, 0, 0, 0],
-    [69, 95, 0, 165, 0, 0, 0],
-    [70, 96, 0, 166, 0, 0, 0],
-    [71, 97, 0, 167, 0, 0, 0],
-    [72, 98, 0, 168, 0, 0, 0],
-    [73, 99, 0, 169, 0, 0, 0],
-    [74, 100, 0, 170, 0, 0, 0],
-    [75, 101, 0, 171, 0, 0, 0],
-    [76, 102, 0, 172, 0, 0, 0],
-    [77, 103, 0, 173, 0, 0, 0],
-    [78, 104, 0, 174, 0, 0, 0],
-    [79, 105, 0, 0, 0, 0, 0],
-    [80, 106, 0, 0, 0, 0, 0],
-    [81, 107, 0, 0, 0, 0, 0],
-    [82, 108, 0, 0, 0, 0, 0],
-    [83, 109, 0, 0, 0, 0, 0],
+    [22, 47, 58, 118, 127, 164, 0],
+    [16, 39, 62, 112, 134, 158, 0],
+    [23, 43, 79, 120, 131, 145, 0],
+    [19, 35, 59, 73, 110, 125, 161],
+    [20, 36, 63, 94, 136, 161, 0],
+    [14, 31, 79, 98, 132, 164, 0],
+    [3, 44, 80, 124, 127, 169, 0],
+    [19, 46, 81, 117, 135, 167, 0],
+    [7, 49, 58, 90, 100, 105, 168],
+    [12, 50, 61, 118, 119, 144, 0],
+    [13, 51, 64, 114, 118, 157, 0],
+    [24, 52, 76, 129, 148, 149, 0],
+    [25, 53, 69, 90, 101, 130, 156],
+    [20, 46, 65, 80, 120, 140, 170],
+    [21, 54, 77, 100, 140, 171, 0],
+    [35, 82, 133, 142, 171, 174, 0],
+    [14, 30, 83, 113, 125, 170, 0],
+    [4, 29, 68, 120, 134, 173, 0],
+    [1, 4, 52, 57, 86, 136, 152],
+    [26, 51, 56, 91, 122, 137, 168],
+    [52, 84, 110, 115, 145, 168, 0],
+    [7, 50, 81, 99, 132, 173, 0],
+    [23, 55, 67, 95, 172, 174, 0],
+    [26, 41, 77, 109, 141, 148, 0],
+    [2, 27, 41, 61, 62, 115, 133],
+    [27, 40, 56, 124, 125, 126, 0],
+    [18, 49, 55, 124, 141, 167, 0],
+    [6, 33, 85, 108, 116, 156, 0],
+    [28, 48, 70, 85, 105, 129, 158],
+    [9, 54, 63, 131, 147, 155, 0],
+    [22, 53, 68, 109, 121, 174, 0],
+    [3, 13, 48, 78, 95, 123, 0],
+    [31, 69, 133, 150, 155, 169, 0],
+    [12, 43, 66, 89, 97, 135, 159],
+    [5, 39, 75, 102, 136, 167, 0],
+    [2, 54, 86, 101, 135, 164, 0],
+    [15, 56, 87, 108, 119, 171, 0],
+    [10, 44, 82, 91, 111, 144, 149],
+    [23, 34, 71, 94, 127, 153, 0],
+    [11, 49, 88, 92, 142, 157, 0],
+    [29, 34, 87, 97, 147, 162, 0],
+    [30, 50, 60, 86, 137, 142, 162],
+    [10, 53, 66, 84, 112, 128, 165],
+    [22, 57, 85, 93, 140, 159, 0],
+    [28, 32, 72, 103, 132, 166, 0],
+    [28, 29, 84, 88, 117, 143, 150],
+    [1, 26, 45, 80, 128, 147, 0],
+    [17, 27, 89, 103, 116, 153, 0],
+    [51, 57, 98, 163, 165, 172, 0],
+    [21, 37, 73, 138, 152, 169, 0],
+    [16, 47, 76, 130, 137, 154, 0],
+    [3, 24, 30, 72, 104, 139, 0],
+    [9, 40, 90, 106, 134, 151, 0],
+    [15, 58, 60, 74, 111, 150, 163],
+    [18, 42, 79, 144, 146, 152, 0],
+    [25, 38, 65, 99, 122, 160, 0],
+    [17, 42, 75, 129, 170, 172, 0],
 ]
 
 
@@ -103,56 +100,49 @@ def build_H():
     m, n = 83, 174
     H = np.zeros((m, n), dtype=np.uint8)
     for i, row in enumerate(NM):
-        if i >= m:
-            break
         for idx in row:
-            if idx > 0 and idx <= n:
+            if 0 < idx <= n:
                 H[i, idx - 1] = 1
     return H
 
 
 class FT8LDPC:
-    """Décodeur LDPC FT8 avec matrice complète et belief propagation."""
+    """Decodeur LDPC(174,91) par propagation de croyance (sum-product)."""
 
     def __init__(self):
         self.H = build_H()
         self.m, self.n = self.H.shape
         self.k = 91
-        self.max_iter = 25
+        self.max_iter = 30
         self.check_nodes = [np.where(self.H[i])[0] for i in range(self.m)]
         self.var_nodes = [np.where(self.H[:, j])[0] for j in range(self.n)]
 
     def decode(self, soft_bits):
-        """Décode un mot de code de 174 LLR."""
-        llr = np.zeros(self.n, dtype=np.float64)
+        """Decode 174 LLR (signe : >0 => bit 0). Retourne les 174 bits durs."""
+        llr0 = np.zeros(self.n, dtype=np.float64)
         n_in = min(len(soft_bits), self.n)
-        llr[:n_in] = np.asarray(soft_bits[:n_in], dtype=np.float64)
-
+        llr0[:n_in] = np.asarray(soft_bits[:n_in], dtype=np.float64)
+        e = np.zeros((self.m, self.n), dtype=np.float64)
         for _ in range(self.max_iter):
-            # Check node update (min-sum)
-            for i, cn in enumerate(self.check_nodes):
-                if len(cn) == 0:
-                    continue
-                for j in cn:
-                    others = [llr[k] for k in cn if k != j]
-                    if others:
-                        sign = np.prod([1 if x >= 0 else -1 for x in others])
-                        mag = min(abs(x) for x in others)
-                        llr[j] += sign * mag * 0.75
-
-            # Hard decision
-            hard = (llr < 0).astype(np.uint8)
-            # Check syndrome
-            syndrome = (self.H @ hard) % 2
-            if np.all(syndrome == 0):
+            total = llr0 + e.sum(axis=0)
+            m_cv = np.zeros_like(e)
+            for j, cn in enumerate(self.check_nodes):
+                m_cv[j, cn] = total[cn] - e[j, cn]
+            for j, cn in enumerate(self.check_nodes):
+                t = np.tanh(m_cv[j, cn] / 2.0)
+                prod = float(np.prod(t))
+                safe = np.where(np.abs(t) < 1e-9, 1e-9, t)
+                excl = prod / safe
+                excl = np.where(np.abs(t) < 1e-9, np.sign(prod) * 1.0, excl)
+                e[j, cn] = 2.0 * np.arctanh(np.clip(excl, -0.999999, 0.999999))
+            hard = ((llr0 + e.sum(axis=0)) < 0).astype(np.uint8)
+            if np.all((self.H @ hard) % 2 == 0):
                 break
-
         return hard
 
     def check(self, bits):
-        """Vérifie si un mot de code est valide (syndrome = 0)."""
+        """Vrai si le syndrome est nul (mot de code valide)."""
         if len(bits) < self.n:
             return False
         hard = np.asarray(bits[:self.n], dtype=np.uint8)
-        syndrome = (self.H @ hard) % 2
-        return np.all(syndrome == 0)
+        return bool(np.all((self.H @ hard) % 2 == 0))
