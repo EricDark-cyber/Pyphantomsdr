@@ -19,26 +19,33 @@ pyphantom/
 │   ├── recorder.py        # enregistrements IQ (.cf32) et audio (.wav)
 │   ├── bookmarks.py       # favoris (JSON : fréquence, nom, mode)
 │   ├── config.py          # réglages persistants (%APPDATA%\PyPhantom)
+│   ├── ft8/               # décodeur FT8/FT4 intégré (LDPC + CRC-14 + unpack WSJT-X)
 │   └── gui/               # fenêtre principale, widget spectre/waterfall, thread d'acquisition
 ├── tests/test_dsp.py      # tests hors-ligne du DSP (signaux synthétiques)
+├── tests/test_ft8.py      # tests du décodeur FT8 (aller-retour audio 8-FSK complet)
 └── tools/make_demo_iq.py  # génère un fichier IQ de démonstration
 ```
 
 ## Installation sous Windows
 
-1. **Python 3.11+** : https://www.python.org/downloads/ — cochez « Add Python to PATH ».
+1. **Python 3.9** (requis par les bindings `_SoapySDR.pyd` de PothosSDR 2021, compilés
+   cp39) : https://www.python.org/downloads/ — cochez « Add Python to PATH ».
+   Vérifiez avec `py -3.9 --version` ; sinon installez Python 3.9.
 2. **PothosSDR** (fournit `SoapySDR.dll` + les modules récepteurs) :
    téléchargez l'installeur sur https://downloads.pothosware.com/ et installez-le,
    puis ajoutez `C:\Program Files\PothosSDR\bin` à la variable d'environnement **PATH**
    (Paramètres système → Variables d'environnement).
 3. **Pilote du dongle** : avec [Zadig](https://zadig.akeo.ie/), remplacez le pilote USB
    du RTL-SDR (etc.) par **WinUSB**.
-4. Dans un terminal (`Win + R`, `cmd`), créez l'environnement et installez les dépendances :
+4. Dans un terminal (`Win + R`, `cmd`), créez l'environnement **Python 3.9** et installez
+   les dépendances :
    ```bat
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
+   py -3.9 -m venv .venv39
+   .venv39\Scripts\activate
+   python -m pip install -r requirements.txt
    ```
+   (Gardez `.venv39` en dehors du dossier téléchargé depuis GitHub : le ZIP de la branche
+   est remplacé à chaque téléchargement.)
    **Ne faites PAS `pip install SoapySDR`** : le paquet PyPI n'a pas de roue Windows.
    Les bindings Python de SoapySDR viennent de PothosSDR. Deux possibilités :
    - Si l'installeur PothosSDR a enregistré ses bindings (c'est le cas des versions
@@ -46,15 +53,16 @@ pyphantom/
      ```bat
      python -c "import SoapySDR; print(SoapySDR.Device.enumerate())"
      ```
-   - Sinon, pointez `PYTHONPATH` vers les bindings de PothosSDR (vérifiez le dossier
-     exact avec `dir "C:\Program Files\PothosSDR\lib\site-packages"` ; le nom du fichier
-     `_SoapySDR.cp3XX-*.pyd` indique la version de Python requise, ex. `cp312` →
-     installez Python 3.12) :
+   - Sinon, pointez `PYTHONPATH` vers les bindings de PothosSDR (chez vous, vérifiez avec
+     `dir "C:\Program Files\PothosSDR\lib" /b` : le dossier s'appelle `python3.9`, d'où
+     l'obligation d'un venv Python 3.9) :
      ```bat
      set PATH=C:\Program Files\PothosSDR\bin;%PATH%
-     set PYTHONPATH=C:\Program Files\PothosSDR\lib\site-packages;%PYTHONPATH%
+     set PYTHONPATH=C:\Program Files\PothosSDR\lib\python3.9\site-packages;%PYTHONPATH%
      python -c "import SoapySDR; print(SoapySDR.Device.enumerate())"
      ```
+     L'application détecte aussi automatiquement ces chemins : lancez simplement
+     `python -m pyphantom` depuis `.venv39`, sans variable d'environnement.
      L'Airspy doit apparaître avec `driver=airspy` (sinon refaire le pilote WinUSB avec Zadig).
 5. Lancez :
    ```bat
@@ -98,11 +106,30 @@ Le fichier `demo.cf32` contient des stations synthétiques : AM à −150 kHz, F
 - **● Rec audio** : enregistre le signal démodulé en `.wav`.
 - **Favoris** (panneau de droite) : double-clic pour accorder ; bouton « Ajouter la fréquence ».
 
+## Décodage FT8 / FT4 (intégré)
+
+Le panneau **« FT8 / FT4 (décodeur intégré) »** (à droite) décode les messages FT8/FT4
+directement depuis l'audio démodulé :
+
+1. Accordez une fréquence FT8 en **USB** (ex. **7,074 MHz** avec le Spyverter : cochez
+   *Spyverter (+120 MHz)* + *Bias-tee*), bande passante ~3 kHz.
+2. Dans le panneau FT8 : cochez **Activer**, laissez **Offset (Hz) = 1500** (position du
+   signal FT8 dans la bande audio ; ajustez entre 200 et 3000 Hz si besoin).
+3. Les messages décodés (indicatif, grid, report SNR) s'affichent en haut de la liste
+   avec l'heure, ex. `14:32:05  CQ F1ABC JN18  -12dB`.
+
+Le décodeur (package `pyphantom/ft8/`) suit la norme WSJT-X : 79 symboles de 0,16 s,
+8 tons espacés de 6,25 Hz, synchro Costas, décodage LDPC(174,91) par propagation de
+croyance, CRC-14 puis dépaquetage du message de 77 bits.
+
 ## Vérification (développement)
 
 ```bat
 python tests/test_dsp.py
+python tests/test_ft8.py
 ```
 
-Teste hors-ligne les démodulateurs AM/NFM/USB/LSB/CW, le rééchantillonnage, le spectre
-et le S-mètre sur des signaux synthétiques.
+`test_dsp.py` teste hors-ligne les démodulateurs AM/NFM/USB/LSB/CW, le rééchantillonnage,
+le spectre et le S-mètre sur des signaux synthétiques. `test_ft8.py` vérifie la chaîne
+FT8 complète : message → CRC → LDPC → audio 8-FSK synthétisé → détection des tons →
+bits → LDPC → CRC → message lisible.

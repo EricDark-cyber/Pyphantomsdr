@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -187,6 +188,30 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._reload_bookmarks()
 
+        ft8_dock = QDockWidget("FT8 / FT4 (decodeur integre)", self)
+        ft8_widget = QWidget()
+        fv = QVBoxLayout(ft8_widget)
+        fh = QHBoxLayout()
+        self.ft8_check = QCheckBox("Activer")
+        fh.addWidget(self.ft8_check)
+        fh.addWidget(QLabel("Mode :"))
+        self.ft8_mode_combo = QComboBox()
+        self.ft8_mode_combo.addItems(["FT8", "FT4"])
+        fh.addWidget(self.ft8_mode_combo)
+        fh.addWidget(QLabel("Offset (Hz) :"))
+        self.ft8_offset = QSpinBox()
+        self.ft8_offset.setRange(200, 3000)
+        self.ft8_offset.setSingleStep(50)
+        self.ft8_offset.setValue(1500)
+        fh.addWidget(self.ft8_offset)
+        fv.addLayout(fh)
+        self.ft8_list = QListWidget()
+        fv.addWidget(self.ft8_list)
+        self.btn_ft8_clear = QPushButton("Effacer")
+        fv.addWidget(self.btn_ft8_clear)
+        ft8_dock.setWidget(ft8_widget)
+        self.addDockWidget(Qt.RightDockWidgetArea, ft8_dock)
+
     def _connect(self) -> None:
         self.btn_refresh.clicked.connect(self._refresh_devices)
         self.btn_open_iq.clicked.connect(self._open_iq_file)
@@ -216,6 +241,11 @@ class MainWindow(QMainWindow):
         self.worker.audioReady.connect(self._on_audio)
         self.worker.smeterReady.connect(self._on_smeter)
         self.worker.infoReady.connect(self.statusBar().showMessage)
+        self.worker.ft8Ready.connect(self._on_ft8_msg)
+        self.ft8_check.toggled.connect(self._on_ft8_toggled)
+        self.ft8_offset.valueChanged.connect(self._on_ft8_offset)
+        self.ft8_mode_combo.currentTextChanged.connect(self._on_ft8_mode)
+        self.btn_ft8_clear.clicked.connect(self.ft8_list.clear)
 
     def _restore_state(self) -> None:
         c = self.cfg
@@ -239,6 +269,11 @@ class MainWindow(QMainWindow):
         gm = str(c.get("gain_mode", "Auto"))
         idx = self.gain_mode_combo.findText(gm)
         self.gain_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.ft8_check.setChecked(bool(c.get("ft8_enabled", False)))
+        self.ft8_offset.setValue(int(c.get("ft8_offset_hz", 1500)))
+        fm = str(c.get("ft8_mode", "FT8"))
+        fidx = self.ft8_mode_combo.findText(fm)
+        self.ft8_mode_combo.setCurrentIndex(fidx if fidx >= 0 else 0)
         self.view.set_center(float(c["frequency_hz"]))
         self.view.set_zoom(float(c["zoom"]))
 
@@ -336,6 +371,7 @@ class MainWindow(QMainWindow):
             self.btn_start.setChecked(False)
             return
         self.worker.set_source(self.source, rate)
+        self._apply_ft8()
         out_rate = int(round(self.worker.out_rate))
         if self.audio.rate != out_rate:
             vol, muted = self.audio.volume, self.audio.muted
@@ -430,6 +466,31 @@ class MainWindow(QMainWindow):
         self.smeter_bar.setValue(v)
         self.smeter_label.setText(f"{s_unit_str(dbm, self.freq_spin.value())}  ({dbm:.0f} dBm)")
 
+    def _apply_ft8(self) -> None:
+        self.worker.set_ft8(
+            self.ft8_check.isChecked(),
+            float(self.ft8_offset.value()),
+            self.ft8_mode_combo.currentText(),
+        )
+
+    def _on_ft8_toggled(self, on: bool) -> None:
+        self._apply_ft8()
+        self.statusBar().showMessage("Decodeur FT8 actif." if on else "Decodeur FT8 desactive.")
+
+    def _on_ft8_offset(self, v: int) -> None:
+        self.worker.ft8_center = float(v)
+        if self.worker.ft8 is not None:
+            self.worker.ft8.center = float(v)
+
+    def _on_ft8_mode(self, _mode: str) -> None:
+        self._apply_ft8()
+
+    def _on_ft8_msg(self, msg: str) -> None:
+        self.ft8_list.insertItem(0, QListWidgetItem(f"{datetime.now():%H:%M:%S}  {msg}"))
+        while self.ft8_list.count() > 200:
+            self.ft8_list.takeItem(self.ft8_list.count() - 1)
+        self.statusBar().showMessage(f"FT8 : {msg}")
+
     def _toggle_rec_iq(self, on: bool) -> None:
         if on:
             path, _ = QFileDialog.getSaveFileName(self, "Enregistrer l'IQ", "recording.cf32", "IQ CF32 (*.cf32)")
@@ -520,6 +581,9 @@ class MainWindow(QMainWindow):
                 "spyverter": self.spyverter_check.isChecked(),
                 "bias_tee": self.bias_check.isChecked(),
                 "gain_mode": self.gain_mode_combo.currentText(),
+                "ft8_enabled": self.ft8_check.isChecked(),
+                "ft8_offset_hz": self.ft8_offset.value(),
+                "ft8_mode": self.ft8_mode_combo.currentText(),
             }
         )
         cfgmod.save(self.cfg)
