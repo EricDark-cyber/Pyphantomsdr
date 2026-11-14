@@ -35,6 +35,9 @@ from .tetra_viterbi import Viterbi16, improved_viterbi  # noqa: F401
 from .tetra_voice import TetraVoiceDecoder  # noqa: F401
 from .timesignals import ALS162Decoder, DCF77Decoder, decode_minute, encode_minute  # noqa: F401
 from .hfdigi import Baseband, make_decoder  # noqa: F401
+from .kalman import KalmanFilter1D, KalmanNR  # noqa: F401
+from .neural_nr import NeuralNR  # noqa: F401
+from .noise import LineEnhancer, NoiseBlanker, SpectralNR, expint_e1  # noqa: F401
 from .receiver import AGC, Receiver  # noqa: F401
 
 __all__ = [
@@ -56,4 +59,6 @@ __all__ = [
     "Viterbi16", "improved_viterbi", "TetraVoiceDecoder",
     "DCF77Decoder", "ALS162Decoder", "decode_minute", "encode_minute",
     "Baseband", "make_decoder", "Receiver", "AGC",
+    "KalmanFilter1D", "KalmanNR", "NeuralNR",
+    "NoiseBlanker", "LineEnhancer", "SpectralNR", "expint_e1",
 ]

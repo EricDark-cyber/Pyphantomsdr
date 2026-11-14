@@ -45,16 +45,23 @@ from pyphantom.decoders.olivia import OliviaDecoder  # noqa: E402
 from pyphantom.decoders import (  # noqa: E402
     DCF77Decoder,
     FaxDecoder,
+    KalmanFilter1D,
+    KalmanNR,
+    LineEnhancer,
+    NeuralNR,
+    NoiseBlanker,
     PacketDecoder,
     PSK31Decoder,
     RTTYDecoder,
     Receiver,
     SSTVDecoder,
+    SpectralNR,
     TETRADecoder,
     WSPRDecoder,
     Baseband,
     decode_minute,
     encode_minute,
+    expint_e1,
     parse_sigmet,
     write_png,
 )
@@ -344,7 +351,7 @@ def test_simple_decoders_and_receiver() -> None:
     bb = Baseband(48000, 700.0, 40.0, 60.0)
     z = bb.process(np.zeros(48000, dtype=np.complex64))
     assert len(z) > 0 and abs(bb.fs_out - 48000 / bb.M) < 1e-9
-    # chaine Receiver complete (I/Q -> audio 48 kHz), repli _NoOpBlock pour noise/kalman/neural
+    # chaine Receiver complete (I/Q -> audio 48 kHz) avec les vrais blocs noise/kalman/neural_nr
     r = Receiver(1_000_000)
     r.set_mode("USB")
     rng = np.random.default_rng(0)
@@ -352,6 +359,105 @@ def test_simple_decoders_and_receiver() -> None:
     audio = r.process(iq)
     assert len(audio) > 0
     print(f"decoders simples + Baseband + Receiver ok (audio {len(audio)} ech.)")
+
+
+def test_noise_kalman_neural() -> None:
+    rng = np.random.default_rng(7)
+    n = 8000
+    t = np.arange(n) / FS
+
+    # --- NoiseBlanker : une impulsion forte sur une tonalite est effacee
+    tone = (0.1 * np.exp(2j * np.pi * 700.0 * t)).astype(np.complex64)
+    x = tone.copy()
+    x[4000] = 20.0 + 0j
+    x[4001] = -18.0 + 5j
+    nb = NoiseBlanker(threshold=4.0, guard=2)
+    nb.enabled = True
+    out = nb.process(x)
+    assert len(out) == len(x)
+    assert nb.blanked > 0
+    # le retard d'anticipation (4*guard) decale la sortie : l'impulsion tombe vers 4008
+    assert np.max(np.abs(out[3990:4020])) < 1.0, np.max(np.abs(out[3990:4020]))
+    nb_off = NoiseBlanker()
+    nb_off.enabled = False
+    assert np.max(np.abs(nb_off.process(x))) > 10.0  # desactive : l'impulsion passe
+
+    # --- LineEnhancer mode "notch" : une porteuse pure est prédite puis soustraite
+    le = LineEnhancer(ntaps=64, delay=64, mu=0.5, mode="notch")
+    le.enabled = True
+    sig = (0.5 * np.sin(2 * np.pi * 1000.0 * t)).astype(np.float32)
+    out = le.process(sig)
+    assert len(out) == len(sig)
+    rms_in = float(np.sqrt(np.mean(sig[n // 2:] ** 2)))
+    rms_out = float(np.sqrt(np.mean(out[n // 2:] ** 2)))
+    assert rms_out < 0.5 * rms_in, (rms_in, rms_out)
+    le2 = LineEnhancer(ntaps=32, delay=1, mu=0.3, mode="enhance")
+    le2.enabled = True
+    assert len(le2.process(sig)) == len(sig)
+
+    # --- KalmanFilter1D : converge vers une entree constante
+    kf = KalmanFilter1D(process_noise=1e-4, measurement_noise=1e-2)
+    v = 0.0
+    for _ in range(500):
+        v = kf.update(1.0)
+    assert abs(v - 1.0) < 0.05
+    out = kf.process(np.full(1000, 3.0, dtype=np.float32))
+    assert len(out) == 1000 and abs(float(out[-1]) - 3.0) < 0.1
+
+    # --- KalmanNR / NeuralNR : meme longueur en sortie, passthrough si desactives
+    a = (0.3 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    knr = KalmanNR(FS)
+    assert knr.available
+    knr.set_enabled(True)
+    knr.set_strength(0.8)
+    out = knr.process(a)
+    assert len(out) == len(a) and out.dtype == np.float32
+    knr.set_enabled(False)
+    assert knr.process(a) is a
+    nnr = NeuralNR(FS)
+    nnr.set_enabled(True)
+    out = nnr.process(a)
+    assert len(out) == len(a) and out.dtype == np.float32
+    nnr.set_enabled(False)
+    assert nnr.process(a) is a
+
+    # --- expint_e1 : valeurs de reference (Abramowitz & Stegun)
+    xs = np.array([0.5, 1.0, 2.0, 5.0])
+    ref = np.array([0.5597735947761608, 0.2193839343955203, 0.0489005107160611, 0.0011482955912753])
+    assert np.allclose(expint_e1(xs), ref, rtol=1e-4, atol=1e-8)
+
+    # --- SpectralNR : reduit la puissance d'un bruit blanc, 3 methodes, longueur bornee
+    for method in SpectralNR.METHODS:
+        snr = SpectralNR(FS, nfft=256, method=method, reduction_db=18.0)
+        snr.enabled = True
+        noisy = a + 0.05 * rng.standard_normal(n).astype(np.float32)
+        out = snr.process(noisy)
+        assert 0 < len(out) <= len(noisy)
+    snr = SpectralNR(FS)
+    snr.enabled = True
+    noise = (0.2 * rng.standard_normal(48000)).astype(np.float32)
+    out = snr.process(noise)
+    rms_in_nr = float(np.sqrt(np.mean(noise[10000:] ** 2)))
+    rms_out_nr = float(np.sqrt(np.mean(out[10000:] ** 2)))
+    assert rms_out_nr < 0.7 * rms_in_nr, (rms_in_nr, rms_out_nr)
+
+    # --- Receiver : les vrais blocs sont instancies et la chaine complete tourne avec
+    r = Receiver(1_000_000)
+    assert isinstance(r.nb, NoiseBlanker)
+    assert isinstance(r.anf, LineEnhancer) and isinstance(r.lms, LineEnhancer)
+    assert isinstance(r.nr, SpectralNR)
+    assert isinstance(r.kalman, KalmanNR) and isinstance(r.neural_nr, NeuralNR)
+    r.set_mode("USB")
+    r.set_nb(True)
+    r.set_nr(True, method="lsa")
+    r.set_anf(True)
+    r.kalman.set_enabled(True)
+    r.neural_nr.set_enabled(True)
+    iq = (0.1 * (rng.standard_normal(100_000) + 1j * rng.standard_normal(100_000))).astype(np.complex64)
+    audio = r.process(iq)
+    assert len(audio) > 0
+    print(f"noise/kalman/neural ok (blanked={nb.blanked}, notch RMS {rms_in:.3f}->{rms_out:.4f}, "
+          f"NR bruit {rms_in_nr:.3f}->{rms_out_nr:.4f}, Receiver+NR audio {len(audio)} ech.)")
 
 
 def test_smoke_decoders() -> None:
@@ -381,5 +487,6 @@ if __name__ == "__main__":
     test_timesignals()
     test_sigmet_pictures()
     test_simple_decoders_and_receiver()
+    test_noise_kalman_neural()
     test_smoke_decoders()
     print("Tous les tests decodeurs passent.")

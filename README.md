@@ -22,7 +22,7 @@ pyphantom/
 │   ├── config.py          # réglages persistants (%APPDATA%\PyPhantom)
 │   ├── ft8/               # décodeur FT8/FT4 intégré (LDPC + CRC-14 + unpack WSJT-X)
 │   ├── spectrum.py        # fenêtres d'analyse + spectre/zoom (utilisé aussi par filters.py)
-│   ├── decoders/          # décodeurs : ADS-B/ModeS+CPR, AIS(GMSK), Olivia/Contestia, PSK31, RTTY, WSPR, packet AX.25, SSTV/fax/Hell (PNG), TETRA, POCSAG/DCS, CTCSS, RDS, SIGMET, DCF77/Allouis, FEC, EKF, AudioFX, Receiver complet
+│   ├── decoders/          # décodeurs : ADS-B/ModeS+CPR, AIS(GMSK), Olivia/Contestia, PSK31, RTTY, WSPR, packet AX.25, SSTV/fax/Hell (PNG), TETRA, POCSAG/DCS, CTCSS, RDS, SIGMET, DCF77/Allouis, FEC, EKF, AudioFX, réduction de bruit (noise blanker, Kalman, NLMS, NR spectrale), Receiver complet
 │   └── gui/               # fenêtre principale, widget spectre/waterfall, thread d'acquisition
 ├── tests/test_dsp.py      # tests hors-ligne du DSP (signaux synthétiques)
 ├── tests/test_filters.py  # tests des filtres en flux (équivalence morcelé / d'un coup)
@@ -134,7 +134,11 @@ En NFM, cochez dans le panneau de droite : **CTCSS** (tonalité sous-audible aff
 bit/s, messages affichés avec RIC et texte), et **Notch 50 Hz** (filtre coupe-bande anti-
 ronflette appliqué à l'audio, via `decoders/audiofx.py`). La bibliothèque complète
 (`pyphantom/decoders/`) contient aussi ADS-B (1090 MHz, CPR), AIS (162 MHz), ACARS, C4FM,
-DMR, RDS/stéréo FM, FEC (Hamming/RS/Viterbi), EKF — prête à être branchée sur le flux IQ.
+DMR, RDS/stéréo FM, FEC (Hamming/RS/Viterbi), EKF, et les blocs de réduction de bruit
+branchés dans `decoders/receiver.py` : **NoiseBlanker** (impulsions, avant le filtre étroit),
+**LineEnhancer** NLMS (notch auto des porteuses ou "enhance"), **SpectralNR** (soustraction
+spectrale Wiener / MMSE-LSA, estimation MCRA), **KalmanNR** et **NeuralNR** sur l'audio —
+prêts à être branchés sur le flux IQ.
 
 ## Vérification (développement)
 

@@ -20,33 +20,9 @@ from .ekf import EKFFilter
 from .tetra_voice import TetraVoiceDecoder
 
 
-class _NoOpBlock:
-    """Repli quand noise.py / kalman.py / neural_nr.py ne sont pas fournis."""
-
-    def __init__(self, *args, **kwargs):
-        self.enabled = False
-
-    def process(self, x, *args, **kwargs):
-        return x
-
-    def set_enabled(self, on):
-        self.enabled = bool(on)
-
-    def __getattr__(self, name):
-        return lambda *a, **k: None
-
-try:
-    from .kalman import KalmanNR
-except ImportError:
-    KalmanNR = _NoOpBlock
-try:
-    from .neural_nr import NeuralNR
-except ImportError:
-    NeuralNR = _NoOpBlock
-try:
-    from .noise import NoiseBlanker, LineEnhancer, SpectralNR
-except ImportError:
-    NoiseBlanker = LineEnhancer = SpectralNR = _NoOpBlock
+from .kalman import KalmanNR
+from .neural_nr import NeuralNR
+from .noise import NoiseBlanker, LineEnhancer, SpectralNR
 from .fmradio import StereoPilot, RDSDecoder, ToneDetector
 from .digital import DCSDetector, Pocsag
 from .audiofx import AudioFX, Contour, APF, DeepNotch
