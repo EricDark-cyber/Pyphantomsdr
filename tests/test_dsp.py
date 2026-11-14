@@ -40,7 +40,7 @@ def test_am() -> None:
     r = (1.0 + 0.6 * np.cos(2 * np.pi * 1000 * t)).astype(np.complex64)
     d = Demodulator(FS, AUDIO_RATE, "AM", 10_000)
     audio = np.concatenate([d.process(r[i : i + 50_000]) for i in range(0, len(r), 50_000)])
-    peak = audio_peak(audio, AUDIO_RATE)
+    peak = audio_peak(audio, d.out_rate)
     assert abs(peak - 1000) < 60, f"AM pic à {peak} Hz, attendu 1000"
     print(f"AM ok (pic {peak:.0f} Hz)")
 
@@ -52,7 +52,7 @@ def test_nfm() -> None:
     r = np.exp(1j * phase).astype(np.complex64)
     d = Demodulator(FS, AUDIO_RATE, "NFM", 12_000)
     audio = np.concatenate([d.process(r[i : i + 50_000]) for i in range(0, len(r), 50_000)])
-    peak = audio_peak(audio, AUDIO_RATE)
+    peak = audio_peak(audio, d.out_rate)
     assert abs(peak - 1000) < 60, f"NFM pic à {peak} Hz, attendu 1000"
     print(f"NFM ok (pic {peak:.0f} Hz)")
 
@@ -63,21 +63,21 @@ def test_usb_lsb_cw() -> None:
     d = Demodulator(FS, AUDIO_RATE, "USB", 2_700)
     r = np.exp(2j * np.pi * 1500 * t).astype(np.complex64)
     audio = np.concatenate([d.process(r[i : i + 50_000]) for i in range(0, n, 50_000)])
-    peak = audio_peak(audio, AUDIO_RATE)
+    peak = audio_peak(audio, d.out_rate)
     assert abs(peak - 1500) < 60, f"USB pic à {peak} Hz, attendu 1500"
     print(f"USB ok (pic {peak:.0f} Hz)")
 
     d = Demodulator(FS, AUDIO_RATE, "LSB", 2_700)
     r = np.exp(-2j * np.pi * 1500 * t).astype(np.complex64)
     audio = np.concatenate([d.process(r[i : i + 50_000]) for i in range(0, n, 50_000)])
-    peak = audio_peak(audio, AUDIO_RATE)
+    peak = audio_peak(audio, d.out_rate)
     assert abs(peak - 1500) < 60, f"LSB pic à {peak} Hz, attendu 1500"
     print(f"LSB ok (pic {peak:.0f} Hz)")
 
     d = Demodulator(FS, AUDIO_RATE, "CW", 600)
     r = np.ones(n, dtype=np.complex64)
     audio = np.concatenate([d.process(r[i : i + 50_000]) for i in range(0, n, 50_000)])
-    peak = audio_peak(audio, AUDIO_RATE)
+    peak = audio_peak(audio, d.out_rate)
     assert abs(peak - 700) < 60, f"CW pic à {peak} Hz, attendu 700 (BFO)"
     print(f"CW ok (pic {peak:.0f} Hz)")
 
@@ -87,7 +87,7 @@ def test_resampler() -> None:
     x = np.cos(2 * np.pi * 1000 * t)
     r = Resampler(FS, AUDIO_RATE)
     y = np.concatenate([r.process(x[i : i + 50_000]) for i in range(0, len(x), 50_000)])
-    peak = audio_peak(y, AUDIO_RATE)
+    peak = audio_peak(y, 48000)
     assert abs(peak - 1000) < 30, f"resampler pic à {peak} Hz, attendu 1000"
     assert abs(len(y) - len(x) * AUDIO_RATE / FS) < 100, "mauvaise longueur de sortie"
     print(f"Resampler ok (pic {peak:.0f} Hz, {len(y)} éch.)")
