@@ -1,0 +1,9 @@
+numpy>=1.26
+scipy>=1.11
+PySide6>=6.5
+pyqtgraph>=0.13
+sounddevice>=0.4.6
+# SoapySDR : sous Windows, installez PothosSDR puis ajoutez
+# C:\Program Files\PothosSDR\bin au PATH, et installez le binding avec :
+#   pip install SoapySDR
+# (voir README.md — étape 2)
