@@ -21,6 +21,9 @@ DEFAULTS = {
     "spyverter": False,
     "bias_tee": False,
     "gain_mode": "Auto",
+    "ft8_enabled": False,
+    "ft8_offset_hz": 1500,
+    "ft8_mode": "FT8",
 }
 
 
