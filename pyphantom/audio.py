@@ -32,7 +32,7 @@ class AudioSink:
         if block is not None and not self.muted:
             m = min(frames, len(block))
             out[:m] = block[:m] * self.volume
-        outdata[:, 0] = out
+        outdata[:] = out.tobytes()
 
     def push(self, block: np.ndarray) -> None:
         if self.stream is None or len(block) == 0:
