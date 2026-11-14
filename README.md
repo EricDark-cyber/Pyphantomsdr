@@ -99,17 +99,28 @@ Le port RadioLab lit aussi les fichiers **WAV I/Q stéréo** produits par SDR# :
 menu « Ouvrir un fichier I/Q… », ou en ligne de commande :
 ```bat
 python -m radiolab.cli enregistrement_IQ.wav --freq 7100000 --mode USB --nr -o audio.wav
+python -m radiolab.cli SDRSharp_20260101_120000Z_7100000Hz.cf32 --rate 2500000 --freq 7100000 --mode LSB -o audio.wav
 ```
+Les fichiers **`.cf32` de SDR#** sont lus directement (I/Q complexe 32 bits brut) : le débit
+se donne avec `--rate` (un .cf32 n'a pas d'en-tête) ou est demandé à l'ouverture dans l'interface.
 
 ## Utilisation
 
-- **START** : ouvre la source sélectionnée (récepteur listé, ou fichier IQ via « Fichier IQ… »).
-- **Clic sur le spectre/waterfall** : accorde la fréquence. **Molette** : zoom (curseur ×1…×64).
-- **Mode / Bande passante** : AM, NFM, WFM, USB, LSB, CW (BFO 700 Hz).
-- **Gain RF + AGC**, **volume**, **muet**, **squelch**, **calibration dBm** (pour le S-mètre).
-- **● Rec IQ** : enregistre le flux brut en `.cf32` (+ métadonnées `.json`).
-- **● Rec audio** : enregistre le signal démodulé en `.wav`.
-- **Favoris** (panneau de droite) : double-clic pour accorder ; bouton « Ajouter la fréquence ».
+- **▶ Airspy** : démarre le récepteur (ctypes sur `airspy.dll`). **Ouvrir un fichier I/Q…** : rejoue un
+  enregistrement WAV I/Q ou **.cf32 de SDR#** (le débit est demandé à l'ouverture d'un .cf32).
+- **Clic sur le spectre/cascade** : accorde. **Molette** : pas ; **Ctrl+molette** : zoom. Le plan de
+  bandes colore le spectre (amateur/radio/aéro/divers).
+- **Modes** : AM, NFM, WFM, USB, LSB, CW, DSB, RAW, TETRA ; AM synchrone + anti-fading, binaural, note CW.
+- **Gain** (0–21, réparti LNA/MIX/VGA), AGC, volume, muet, squelch, S-mètre (calibration dBm), décimation.
+- **Enregistrement** : « ● Audio » (WAV) et « ● I/Q » au format choisi à côté — **WAV 16 bits** ou
+  **CF32** (format brut de SDR#, sans limite de 4 Go, rejouable dans SDR# ou PyPhantom). Programmable
+  via « Programmer… » (section Outils).
+- **Scanner** (section Mémoires) : parcourt les mémoires ou une plage, s'arrête sur squelch, journal CSV.
+- **Commande à distance** (section Outils) : **Commande réseau** = rigctl texte sur 127.0.0.1:4532
+  (Gpredict, WSJT-X « NET rigctl ») ; **CAT série** = mêmes commandes sur un port COM (Gpredict en
+  série, OmniRig) : régler le port COM et le baud.
+- **Anti-bruit** : NB (impulsions), NR spectrale (Wiener/MMSE-LSA/LMS), ANF (notch auto des porteuses).
+- **Mémoires** : import/export CSV (nom ; fréquence Hz ; mode ; groupe).
 
 ## Décodage FT8 / FT4 (intégré)
 
@@ -148,6 +159,7 @@ python tests/test_filters.py
 python tests/test_ft8.py
 python tests/test_decoders.py
 python tests/test_radiolab_port.py
+python tests/test_cf32_cat.py
 ```
 
 Banc de tests pytest du port RadioLab 0.15 (nécessite `pip install pytest`) :
