@@ -15,10 +15,12 @@ def _try_pothos_paths() -> None:
         bin_dir = os.path.join(root, "bin")
         if not os.path.isdir(bin_dir):
             continue
+        if bin_dir.lower() not in os.environ.get("PATH", "").lower():
+            os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
         try:
             os.add_dll_directory(bin_dir)
         except Exception:
-            os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+            pass
         lib = os.path.join(root, "lib")
         if os.path.isdir(lib):
             for name in os.listdir(lib):
@@ -29,12 +31,6 @@ def _try_pothos_paths() -> None:
 
 
 def import_soapy():
-    try:
-        import SoapySDR
-
-        return SoapySDR
-    except Exception:
-        pass
     _try_pothos_paths()
     try:
         import SoapySDR
@@ -43,8 +39,7 @@ def import_soapy():
     except Exception as exc:
         raise RuntimeError(
             "Module SoapySDR introuvable. Installez PothosSDR (https://downloads.pothosware.com/) "
-            "dans C:\\Program Files\\PothosSDR, ou posez PATH=...\\PothosSDR\\bin et "
-            "PYTHONPATH=...\\PothosSDR\\lib\\python3.X\\site-packages (voir README.md)."
+            "dans C:\\Program Files\\PothosSDR (son dossier bin doit etre dans le PATH), voir README.md."
         ) from exc
 
 
