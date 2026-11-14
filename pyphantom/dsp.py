@@ -1,8 +1,17 @@
-"""Chaine DSP : spectre, waterfall, demodulation, S-metre (inspire de PhantomSDR-Plus)."""
+"""Chaine DSP : spectre, demodulation, S-metre (filtres en flux : filters.py)."""
 from __future__ import annotations
 
 import numpy as np
-from scipy import signal
+
+from .filters import (
+    LinearResampler,
+    Mixer,
+    PolyDDC,
+    StreamFIR,
+    exp_taps,
+    lowpass_taps,
+    taps_for_transition,
+)
 
 MODES = ("AM", "NFM", "WFM", "USB", "LSB", "CW")
 MODE_BW = {
@@ -40,87 +49,18 @@ def power_dbfs(iq: np.ndarray) -> float:
     return 10.0 * np.log10(p + 1e-20)
 
 
-class FirLP:
-    def __init__(self, cutoff_hz: float, fs: float):
-        cutoff = float(min(cutoff_hz, 0.49 * fs))
-        numtaps = int(np.clip(63.0 * fs / max(cutoff, 1.0), 33, 1025))
-        if numtaps % 2 == 0:
-            numtaps += 1
-        self.h = signal.firwin(numtaps, cutoff, fs=fs)
-        self.zi = signal.lfilter_zi(self.h, [1.0]) * 0.0
-
-    def __call__(self, x: np.ndarray) -> np.ndarray:
-        y, self.zi = signal.lfilter(self.h, [1.0], x, zi=self.zi)
-        return y
+class Resampler(LinearResampler):
+    """Resampling lineaire en flux (alias de LinearResampler, compat tests)."""
 
 
-class FirDecim:
-    def __init__(self, down: int, cutoff_hz: float, fs: float, dtype=np.complex128):
-        self.down = int(down)
-        self.dtype = dtype
-        if self.down <= 1:
-            self.h = None
-            return
-        numtaps = min(int(8 * self.down) + 1, 4096)
-        if numtaps % 2 == 0:
-            numtaps += 1
-        cutoff = min(cutoff_hz, 0.49 * fs)
-        self.h = signal.firwin(numtaps, cutoff, fs=fs) / self.down
-        self.hr = self.h[::-1].copy()
-        self.tail = np.zeros(numtaps - 1, dtype=dtype)
-
-    def process(self, x: np.ndarray) -> np.ndarray:
-        if self.h is None:
-            return np.asarray(x, dtype=self.dtype)
-        buf = np.concatenate([self.tail, x])
-        L = len(self.h)
-        n_out = (len(buf) - L) // self.down
-        if n_out <= 0:
-            self.tail = buf
-            return np.zeros(0, dtype=self.dtype)
-        out = np.zeros(n_out, dtype=np.complex128 if self.dtype == np.complex128 else np.float64)
-        for k in range(L):
-            out += self.hr[k] * buf[k :: self.down][:n_out]
-        self.tail = buf[n_out * self.down :]
-        return out
-
-
-class Resampler:
-    def __init__(self, fs_in: float, fs_out: int):
-        fs_in_i = int(round(fs_in))
-        fs_out_i = int(round(fs_out))
-        g = int(np.gcd(fs_in_i, fs_out_i))
-        self.up = fs_out_i // g
-        self.down = fs_in_i // g
-        rate_up = fs_in_i * self.up
-        cutoff = 0.45 * min(fs_in_i, fs_out_i)
-        numtaps = int(np.clip(8 * max(self.up, self.down) + 1, 33, 4096))
-        if numtaps % 2 == 0:
-            numtaps += 1
-        self.h = signal.firwin(numtaps, cutoff, fs=rate_up)
-        self.hr = self.h[::-1].copy()
-        self.tail = np.zeros(numtaps - 1, dtype=np.float64)
-
-    def process(self, x: np.ndarray) -> np.ndarray:
-        x = np.asarray(x, dtype=np.float64)
-        if self.up == 1 and self.down == 1:
-            return x
-        z = np.zeros(len(x) * self.up, dtype=np.float64)
-        z[:: self.up] = x
-        buf = np.concatenate([self.tail, z])
-        L = len(self.h)
-        n_out = (len(buf) - L) // self.down
-        if n_out <= 0:
-            self.tail = buf
-            return np.zeros(0, dtype=np.float64)
-        out = np.zeros(n_out, dtype=np.float64)
-        for k in range(L):
-            out += self.hr[k] * buf[k :: self.down][:n_out]
-        self.tail = buf[n_out * self.down :]
-        return out
+def _lp(cutoff_hz: float, fs: float) -> StreamFIR:
+    ntaps = taps_for_transition(fs, max(0.15 * cutoff_hz, 1.0))
+    return StreamFIR(lowpass_taps(cutoff_hz, fs, ntaps))
 
 
 class Demodulator:
+    """Chaine : DDC polyphase (filtre de canal + decimation) -> demod -> audio 48 kHz."""
+
     def __init__(self, fs_in: float, audio_rate: int = 48000, mode: str = "NFM", bw: float | None = None):
         self.fs_in = float(fs_in)
         self.audio_rate = int(audio_rate)
@@ -130,11 +70,9 @@ class Demodulator:
         self.agc_enabled = True
         self.agc_target = 0.05
         self.squelch_db = -120.0
-        self._n = 0
         self._prev = 1.0 + 0.0j
         self._agc_env = 1e-6
         self._agc_gain = 1.0
-        self._deemph_zi = np.zeros(1)
         self._rebuild()
 
     def set_mode(self, mode: str, bw: float | None = None) -> None:
@@ -152,68 +90,72 @@ class Demodulator:
     def _rebuild(self) -> None:
         bw = self.bw
         fs1_target = max(2.5 * bw, 2.2 * self.audio_rate)
-        k = max(1, int(np.ceil(fs1_target / self.audio_rate)))
-        down = max(1, int(round(self.fs_in / (self.audio_rate * k))))
-        self._decim = FirDecim(down, min(bw, 0.49 * self.fs_in), self.fs_in)
-        self.fs_demod = self.fs_in / down
-        down2 = max(1, int(round(self.fs_demod / self.audio_rate)))
-        self.out_rate = self.fs_demod / down2
-        self._decim2 = FirDecim(down2, 0.45 * self.out_rate, self.fs_demod, dtype=np.float64)
+        m = max(1, int(round(self.fs_in / fs1_target)))
+        if self.mode == "CW":
+            pass1 = self.bfo + bw / 2.0
+        elif self.mode in ("USB", "LSB"):
+            pass1 = bw
+        else:
+            pass1 = bw / 2.0
+        self._ddc = PolyDDC(self.fs_in, m, pass1)
+        self.fs_demod = self.fs_in / m
+        self.out_rate = float(self.audio_rate)
         if self.mode == "CW":
             cutoff = self.bfo + bw / 2.0
         else:
             cutoff = bw / 2.0
         cutoff = min(cutoff, 0.45 * self.fs_demod)
-        self._lp = FirLP(cutoff, self.fs_demod)
-        self._lp_pre = FirLP(min(bw / 2.0, 0.45 * self.fs_demod), self.fs_demod)
-        self._lp_chan = FirLP(min(bw, 0.45 * self.fs_demod), self.fs_demod)
-        if self.mode in ("NFM", "WFM"):
-            a = np.exp(-1.0 / (self.out_rate * DEEMPHASIS_TAU))
-            self._deemph_b = np.array([1.0 - a])
-            self._deemph_a = np.array([1.0, -a])
-            self._deemph_zi = np.zeros(1)
+        self._lp = _lp(cutoff, self.fs_demod)
+        self._lp_pre = _lp(min(bw / 2.0, 0.45 * self.fs_demod), self.fs_demod)
+        self._mix = Mixer(self.fs_demod)
+        self._mix_back = Mixer(self.fs_demod)
+        if self.mode == "USB":
+            self._mix.set_offset(-bw / 2.0)
+            self._mix_back.set_offset(bw / 2.0)
+        elif self.mode == "LSB":
+            self._mix.set_offset(bw / 2.0)
+            self._mix_back.set_offset(-bw / 2.0)
+        else:  # CW
+            self._mix.set_offset(-self.bfo)
+        self._resamp = LinearResampler(self.fs_demod, self.audio_rate)
+        self._deemph = StreamFIR(exp_taps(DEEMPHASIS_TAU, self.out_rate)) if self.mode in ("NFM", "WFM") else None
 
     def process(self, iq: np.ndarray) -> np.ndarray:
         iq = np.asarray(iq, dtype=np.complex64)
         if len(iq) == 0:
             return np.zeros(0, dtype=np.float32)
-        x = self._decim.process(iq)
+        x = self._ddc.process(iq)
         if len(x) == 0:
             return np.zeros(0, dtype=np.float32)
         fs = self.fs_demod
         m = self.mode
-        n = self._n + np.arange(len(x), dtype=np.float64)
         if m == "AM":
-            env = np.abs(self._lp_pre(x)).astype(np.float64)
-            base = self._lp(env - env.mean())
+            env = np.abs(self._lp_pre.process(x)).astype(np.float64)
+            base = self._lp.process(env - env.mean())
         elif m in ("NFM", "WFM"):
             ref_dev = 5_000.0 if m == "NFM" else 75_000.0
-            y = self._lp_pre(x)
+            y = self._lp_pre.process(x)
             prev = np.concatenate(([self._prev], y[:-1]))
             d = np.angle(y * np.conj(prev)) / (2.0 * np.pi) * fs / ref_dev
             self._prev = y[-1]
-            base = self._lp(d)
+            base = self._lp.process(d)
         elif m == "USB":
-            y = x * np.exp(-1j * np.pi * self.bw * n / fs)
-            z = self._lp(y)
-            base = 2.0 * np.real(z * np.exp(1j * np.pi * self.bw * n / fs))
+            z = self._lp.process(self._mix.process(x))
+            base = 2.0 * np.real(self._mix_back.process(z))
         elif m == "LSB":
-            y = x * np.exp(1j * np.pi * self.bw * n / fs)
-            z = self._lp(y)
-            base = 2.0 * np.real(z * np.exp(-1j * np.pi * self.bw * n / fs))
-        else:
-            y = x * np.exp(-2j * np.pi * self.bfo * n / fs)
-            base = 2.0 * np.real(self._lp(y))
-        self._n = n[-1] + 1.0
-        chan_db = power_dbfs(self._lp_chan(x))
-        audio = self._decim2.process(base)
-        if m in ("NFM", "WFM") and len(audio):
-            audio, self._deemph_zi = signal.lfilter(self._deemph_b, self._deemph_a, audio, zi=self._deemph_zi)
+            z = self._lp.process(self._mix.process(x))
+            base = 2.0 * np.real(self._mix_back.process(z))
+        else:  # CW
+            base = 2.0 * np.real(self._lp.process(self._mix.process(x)))
+        chan_db = power_dbfs(x)
+        audio = self._resamp.process(np.asarray(base, dtype=np.float32))
+        if self._deemph is not None and len(audio):
+            audio = self._deemph.process(audio.astype(np.float64)).astype(np.float32)
         if len(audio):
             if chan_db < self.squelch_db:
                 audio = np.zeros_like(audio)
             elif self.agc_enabled:
-                p = float(np.mean(audio * audio))
+                p = float(np.mean(audio.astype(np.float64) ** 2))
                 env = 0.95 * self._agc_env + 0.05 * np.sqrt(p + 1e-20)
                 self._agc_env = env
                 g = float(np.clip(self.agc_target / max(env, 1e-6), 0.1, 100.0))

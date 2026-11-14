@@ -15,6 +15,7 @@ pyphantom/
 │   ├── __main__.py        # point d'entrée : python -m pyphantom
 │   ├── device.py          # SoapySDR (matériel) + IqFileSource (fichier .cf32)
 │   ├── dsp.py             # démodulateurs AM/FM/SSB/CW, spectre, S-mètre, AGC, squelch
+│   ├── filters.py         # filtres en flux : RIF, DDC polyphase, mixer, resampling
 │   ├── audio.py           # sortie audio temps réel
 │   ├── recorder.py        # enregistrements IQ (.cf32) et audio (.wav)
 │   ├── bookmarks.py       # favoris (JSON : fréquence, nom, mode)
@@ -22,6 +23,7 @@ pyphantom/
 │   ├── ft8/               # décodeur FT8/FT4 intégré (LDPC + CRC-14 + unpack WSJT-X)
 │   └── gui/               # fenêtre principale, widget spectre/waterfall, thread d'acquisition
 ├── tests/test_dsp.py      # tests hors-ligne du DSP (signaux synthétiques)
+├── tests/test_filters.py  # tests des filtres en flux (équivalence morcelé / d'un coup)
 ├── tests/test_ft8.py      # tests du décodeur FT8 (aller-retour audio 8-FSK complet)
 └── tools/make_demo_iq.py  # génère un fichier IQ de démonstration
 ```
@@ -126,10 +128,13 @@ croyance, CRC-14 puis dépaquetage du message de 77 bits.
 
 ```bat
 python tests/test_dsp.py
+python tests/test_filters.py
 python tests/test_ft8.py
 ```
 
 `test_dsp.py` teste hors-ligne les démodulateurs AM/NFM/USB/LSB/CW, le rééchantillonnage,
-le spectre et le S-mètre sur des signaux synthétiques. `test_ft8.py` vérifie la chaîne
+le spectre et le S-mètre sur des signaux synthétiques. `test_filters.py` vérifie les
+filtres en flux (`filters.py`) : sortie identique morcelée ou d'un seul coup, DDC
+polyphase, mixer à phase continue, resampling. `test_ft8.py` vérifie la chaîne
 FT8 complète : message → CRC → LDPC → audio 8-FSK synthétisé → détection des tons →
 bits → LDPC → CRC → message lisible.
