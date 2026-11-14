@@ -24,6 +24,10 @@ DEFAULTS = {
     "ft8_enabled": False,
     "ft8_offset_hz": 1500,
     "ft8_mode": "FT8",
+    "dec_ctcss": False,
+    "dec_dcs": False,
+    "dec_pocsag": False,
+    "dec_notch50": False,
 }
 
 

@@ -21,10 +21,12 @@ pyphantom/
 │   ├── bookmarks.py       # favoris (JSON : fréquence, nom, mode)
 │   ├── config.py          # réglages persistants (%APPDATA%\PyPhantom)
 │   ├── ft8/               # décodeur FT8/FT4 intégré (LDPC + CRC-14 + unpack WSJT-X)
+│   ├── decoders/          # décodeurs numériques : ADS-B, AIS, ACARS, C4FM, DMR, POCSAG, CTCSS/DCS, RDS, FEC, EKF, AudioFX
 │   └── gui/               # fenêtre principale, widget spectre/waterfall, thread d'acquisition
 ├── tests/test_dsp.py      # tests hors-ligne du DSP (signaux synthétiques)
 ├── tests/test_filters.py  # tests des filtres en flux (équivalence morcelé / d'un coup)
 ├── tests/test_ft8.py      # tests du décodeur FT8 (aller-retour audio 8-FSK complet)
+├── tests/test_decoders.py # tests des décodeurs (CRC, CPR, AIS, POCSAG/DCS, CTCSS, ADS-B...)
 └── tools/make_demo_iq.py  # génère un fichier IQ de démonstration
 ```
 
@@ -124,12 +126,22 @@ Le décodeur (package `pyphantom/ft8/`) suit la norme WSJT-X : 79 symboles de 0,
 8 tons espacés de 6,25 Hz, synchro Costas, décodage LDPC(174,91) par propagation de
 croyance, CRC-14 puis dépaquetage du message de 77 bits.
 
+## Décodeurs audio (panneau « Décodeurs »)
+
+En NFM, cochez dans le panneau de droite : **CTCSS** (tonalité sous-audible affichée),
+**DCS** (code numérique, avec correction Golay), **POCSAG** (radiomessagerie 512/1200/2400
+bit/s, messages affichés avec RIC et texte), et **Notch 50 Hz** (filtre coupe-bande anti-
+ronflette appliqué à l'audio, via `decoders/audiofx.py`). La bibliothèque complète
+(`pyphantom/decoders/`) contient aussi ADS-B (1090 MHz, CPR), AIS (162 MHz), ACARS, C4FM,
+DMR, RDS/stéréo FM, FEC (Hamming/RS/Viterbi), EKF — prête à être branchée sur le flux IQ.
+
 ## Vérification (développement)
 
 ```bat
 python tests/test_dsp.py
 python tests/test_filters.py
 python tests/test_ft8.py
+python tests/test_decoders.py
 ```
 
 `test_dsp.py` teste hors-ligne les démodulateurs AM/NFM/USB/LSB/CW, le rééchantillonnage,
@@ -137,4 +149,6 @@ le spectre et le S-mètre sur des signaux synthétiques. `test_filters.py` véri
 filtres en flux (`filters.py`) : sortie identique morcelée ou d'un seul coup, DDC
 polyphase, mixer à phase continue, resampling. `test_ft8.py` vérifie la chaîne
 FT8 complète : message → CRC → LDPC → audio 8-FSK synthétisé → détection des tons →
-bits → LDPC → CRC → message lisible.
+bits → LDPC → CRC → message lisible. `test_decoders.py` valide les décodeurs : CRC-16/24
+(trame Mode S officielle), CPR ADS-B (aller-retour), position AIS, BitSlicer, BCH/POCSAG,
+Golay/DCS, CTCSS, notch AudioFX, trame ADS-B PPM synthétique (DF17 + ICAO), EKF, Hamming.

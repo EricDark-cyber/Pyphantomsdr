@@ -212,6 +212,24 @@ class MainWindow(QMainWindow):
         ft8_dock.setWidget(ft8_widget)
         self.addDockWidget(Qt.RightDockWidgetArea, ft8_dock)
 
+        dec_dock = QDockWidget("Decodeurs (CTCSS / DCS / POCSAG)", self)
+        dec_widget = QWidget()
+        dcv = QVBoxLayout(dec_widget)
+        dch = QHBoxLayout()
+        self.dec_ctcss_check = QCheckBox("CTCSS")
+        self.dec_dcs_check = QCheckBox("DCS")
+        self.dec_pocsag_check = QCheckBox("POCSAG")
+        self.dec_notch50_check = QCheckBox("Notch 50 Hz")
+        for w in (self.dec_ctcss_check, self.dec_dcs_check, self.dec_pocsag_check, self.dec_notch50_check):
+            dch.addWidget(w)
+        dcv.addLayout(dch)
+        self.dec_list = QListWidget()
+        dcv.addWidget(self.dec_list)
+        self.btn_dec_clear = QPushButton("Effacer")
+        dcv.addWidget(self.btn_dec_clear)
+        dec_dock.setWidget(dec_widget)
+        self.addDockWidget(Qt.RightDockWidgetArea, dec_dock)
+
     def _connect(self) -> None:
         self.btn_refresh.clicked.connect(self._refresh_devices)
         self.btn_open_iq.clicked.connect(self._open_iq_file)
@@ -246,6 +264,12 @@ class MainWindow(QMainWindow):
         self.ft8_offset.valueChanged.connect(self._on_ft8_offset)
         self.ft8_mode_combo.currentTextChanged.connect(self._on_ft8_mode)
         self.btn_ft8_clear.clicked.connect(self.ft8_list.clear)
+        self.worker.decReady.connect(self._on_dec_msg)
+        self.dec_ctcss_check.toggled.connect(self._on_dec_changed)
+        self.dec_dcs_check.toggled.connect(self._on_dec_changed)
+        self.dec_pocsag_check.toggled.connect(self._on_dec_changed)
+        self.dec_notch50_check.toggled.connect(self._on_dec_changed)
+        self.btn_dec_clear.clicked.connect(self.dec_list.clear)
 
     def _restore_state(self) -> None:
         c = self.cfg
@@ -274,6 +298,10 @@ class MainWindow(QMainWindow):
         fm = str(c.get("ft8_mode", "FT8"))
         fidx = self.ft8_mode_combo.findText(fm)
         self.ft8_mode_combo.setCurrentIndex(fidx if fidx >= 0 else 0)
+        self.dec_ctcss_check.setChecked(bool(c.get("dec_ctcss", False)))
+        self.dec_dcs_check.setChecked(bool(c.get("dec_dcs", False)))
+        self.dec_pocsag_check.setChecked(bool(c.get("dec_pocsag", False)))
+        self.dec_notch50_check.setChecked(bool(c.get("dec_notch50", False)))
         self.view.set_center(float(c["frequency_hz"]))
         self.view.set_zoom(float(c["zoom"]))
 
@@ -372,6 +400,7 @@ class MainWindow(QMainWindow):
             return
         self.worker.set_source(self.source, rate)
         self._apply_ft8()
+        self._apply_decoders()
         out_rate = int(round(self.worker.out_rate))
         if self.audio.rate != out_rate:
             vol, muted = self.audio.volume, self.audio.muted
@@ -491,6 +520,27 @@ class MainWindow(QMainWindow):
             self.ft8_list.takeItem(self.ft8_list.count() - 1)
         self.statusBar().showMessage(f"FT8 : {msg}")
 
+    def _apply_decoders(self) -> None:
+        names = set()
+        if self.dec_ctcss_check.isChecked():
+            names.add("ctcss")
+        if self.dec_dcs_check.isChecked():
+            names.add("dcs")
+        if self.dec_pocsag_check.isChecked():
+            names.add("pocsag")
+        if self.dec_notch50_check.isChecked():
+            names.add("notch50")
+        self.worker.set_decoders(names)
+
+    def _on_dec_changed(self, _on: bool) -> None:
+        self._apply_decoders()
+
+    def _on_dec_msg(self, msg: str) -> None:
+        self.dec_list.insertItem(0, QListWidgetItem(f"{datetime.now():%H:%M:%S}  {msg}"))
+        while self.dec_list.count() > 200:
+            self.dec_list.takeItem(self.dec_list.count() - 1)
+        self.statusBar().showMessage(msg)
+
     def _toggle_rec_iq(self, on: bool) -> None:
         if on:
             path, _ = QFileDialog.getSaveFileName(self, "Enregistrer l'IQ", "recording.cf32", "IQ CF32 (*.cf32)")
@@ -584,6 +634,10 @@ class MainWindow(QMainWindow):
                 "ft8_enabled": self.ft8_check.isChecked(),
                 "ft8_offset_hz": self.ft8_offset.value(),
                 "ft8_mode": self.ft8_mode_combo.currentText(),
+                "dec_ctcss": self.dec_ctcss_check.isChecked(),
+                "dec_dcs": self.dec_dcs_check.isChecked(),
+                "dec_pocsag": self.dec_pocsag_check.isChecked(),
+                "dec_notch50": self.dec_notch50_check.isChecked(),
             }
         )
         cfgmod.save(self.cfg)
