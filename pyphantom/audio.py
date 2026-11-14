@@ -11,7 +11,8 @@ class AudioSink:
         self.rate = int(rate)
         self.volume = float(volume)
         self.muted = bool(muted)
-        self.q: queue.Queue = queue.Queue(maxsize=64)
+        self.q: queue.Queue = queue.Queue(maxsize=128)
+        self._last = None
         self.stream = None
         try:
             import sounddevice as sd
@@ -27,11 +28,13 @@ class AudioSink:
         try:
             block = self.q.get_nowait()
         except queue.Empty:
-            block = None
+            block = self._last
         out = np.zeros(frames, dtype=np.float32)
-        if block is not None and not self.muted:
-            m = min(frames, len(block))
-            out[:m] = block[:m] * self.volume
+        if block is not None:
+            self._last = block
+            if not self.muted:
+                m = min(frames, len(block))
+                out[:m] = block[:m] * self.volume
         outdata[:] = out.tobytes()
 
     def push(self, block: np.ndarray) -> None:
