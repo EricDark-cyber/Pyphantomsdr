@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self.worker.audio_rate = int(self.cfg["audio_rate"])
         self.worker.calibration_db = float(self.cfg["calibration_db"])
         self.audio = AudioSink(int(self.cfg["audio_rate"]), float(self.cfg["volume"]), bool(self.cfg["muted"]))
+        self.worker.audio_sink = self.audio
         self._build_ui()
         self._connect()
         self._restore_state()
@@ -335,6 +336,12 @@ class MainWindow(QMainWindow):
             self.btn_start.setChecked(False)
             return
         self.worker.set_source(self.source, rate)
+        out_rate = int(round(self.worker.out_rate))
+        if self.audio.rate != out_rate:
+            vol, muted = self.audio.volume, self.audio.muted
+            self.audio.close()
+            self.audio = AudioSink(out_rate, vol, muted)
+            self.worker.audio_sink = self.audio
         self.worker.demod.set_mode(self.mode_combo.currentText(), float(self.bw_spin.value()))
         self.worker.demod.squelch_db = float(self.squelch_slider.value())
         self.worker.demod.agc_enabled = True
@@ -432,6 +439,7 @@ class MainWindow(QMainWindow):
             freq = self.freq_spin.value() * 1e6
             rate = self.source.sample_rate if self.source else float(self.rate_combo.currentData())
             self.iq_rec = IqRecorder(path, freq, rate)
+            self.worker.emit_iq = True
             self.statusBar().showMessage(f"Enregistrement IQ : {path}")
         else:
             self._stop_rec_iq()
@@ -440,6 +448,7 @@ class MainWindow(QMainWindow):
         if self.iq_rec is not None:
             self.iq_rec.close()
             self.iq_rec = None
+        self.worker.emit_iq = False
         self.btn_rec_iq.setChecked(False)
 
     def _toggle_rec_wav(self, on: bool) -> None:
@@ -448,7 +457,8 @@ class MainWindow(QMainWindow):
             if not path:
                 self.btn_rec_wav.setChecked(False)
                 return
-            self.wav_rec = AudioRecorder(path, int(self.cfg["audio_rate"]))
+            self.wav_rec = AudioRecorder(path, int(round(self.worker.out_rate)))
+            self.worker.emit_audio = True
             self.statusBar().showMessage(f"Enregistrement audio : {path}")
         else:
             self._stop_rec_wav()
@@ -457,6 +467,7 @@ class MainWindow(QMainWindow):
         if self.wav_rec is not None:
             self.wav_rec.close()
             self.wav_rec = None
+        self.worker.emit_audio = False
         self.btn_rec_wav.setChecked(False)
 
     def _reload_bookmarks(self) -> None:
