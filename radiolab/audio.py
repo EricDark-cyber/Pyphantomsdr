@@ -1,4 +1,4 @@
-"""Sortie audio (carte son) et enregistrement WAV."""
+"""Sortie audio (carte son) et enregistrements WAV / CF32 (I/Q brut, format SDR#)."""
 import collections
 import datetime
 import threading
@@ -102,7 +102,33 @@ class WavWriter:
                 self.w = None
 
 
-def recording_name(folder, center_hz, iq):
+class Cf32Writer:
+    """Écrit un fichier .cf32 : I/Q complexe 32 bits little-endian, brut (format SDR#).
+
+    Pas d'en-tête, pas de limite des 4 Go du WAV : on peut enregistrer longtemps.
+    """
+
+    def __init__(self, path, rate):
+        self.path, self.rate = path, int(rate)
+        self.f = open(path, "wb")
+        self.lock = threading.Lock()
+        self.bytes = 0
+
+    def write(self, x):
+        data = np.ascontiguousarray(x, dtype="<c8").tobytes()
+        with self.lock:
+            if self.f is not None:
+                self.f.write(data)
+                self.bytes += len(data)
+
+    def close(self):
+        with self.lock:
+            if self.f is not None:
+                self.f.close()
+                self.f = None
+
+
+def recording_name(folder, center_hz, iq, ext="wav"):
     """Nom compatible avec la convention de SDR# (la fréquence est relue à l'ouverture)."""
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%SZ")
-    return "%s/RadioLab_%s_%dHz_%s.wav" % (folder, stamp, int(round(center_hz)), "IQ" if iq else "AF")
+    return "%s/PyPhantom_%s_%dHz_%s.%s" % (folder, stamp, int(round(center_hz)), "IQ" if iq else "AF", ext)

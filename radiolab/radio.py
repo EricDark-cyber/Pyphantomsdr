@@ -13,12 +13,13 @@ import numpy as np
 from .dsp.receiver import Receiver, MODES
 from .dsp.filters import PolyDDC
 from .dsp.spectrum import power_spectrum_db, zoom_spectrum, auto_nfft, DEFAULT_WINDOW
-from .audio import NullAudio, WavWriter, recording_name, as_stereo
+from .audio import Cf32Writer, NullAudio, WavWriter, recording_name, as_stereo
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".radiolab.json")
 DEFAULTS = {"vfo_hz": 7_100_000, "mode": "LSB", "gain": 12, "gain_mode": "linearity", "spyverter": True,
             "sample_rate": 2_500_000, "volume": 0.5, "dll_path": "", "record_dir": os.path.expanduser("~"),
             "jobs": [], "audio_device": "", "sv_ppm": 0.0, "decimation": 1,
+            "iq_format": "wav", "file_rate": 0, "cat_port": "COM3", "cat_baud": 9600,
             "memories": [{"name": "France Inter FM", "hz": 87_800_000, "mode": "WFM"},
                          {"name": "40 m BLU", "hz": 7_100_000, "mode": "LSB"},
                          {"name": "20 m BLU", "hz": 14_200_000, "mode": "USB"}]}
@@ -417,9 +418,14 @@ class Radio:
         return self.vfo_hz + self.rx.lo + shift, self.vfo_hz + self.rx.hi + shift
 
     # ------------------------------------------------------ enregistrements
-    def start_recording(self, folder, iq):
-        path = recording_name(folder, self.center_hz if iq else self.vfo_hz, iq)
-        writer = WavWriter(path, self.sample_rate if iq else self.rx.audio_rate, iq=iq)
+    def start_recording(self, folder, iq, fmt=None):
+        fmt = (fmt or "wav").lower()
+        ext = "cf32" if (iq and fmt == "cf32") else "wav"
+        path = recording_name(folder, self.center_hz if iq else self.vfo_hz, iq, ext=ext)
+        if iq and ext == "cf32":
+            writer = Cf32Writer(path, self.sample_rate)
+        else:
+            writer = WavWriter(path, self.sample_rate if iq else self.rx.audio_rate, iq=iq)
         if iq:
             self.iq_rec = writer
         else:

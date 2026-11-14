@@ -1,9 +1,11 @@
-"""Lecture d'un enregistrement I/Q au format WAV stéréo (I = gauche, Q = droite).
+"""Lecture d'un enregistrement I/Q : WAV stéréo (I = gauche, Q = droite) ou .cf32 brut (SDR#).
 
-Formats acceptés : PCM 8 ou 16 bits et flottant 32 bits, comme les fichiers
-produits par SDR# ou par RadioLab.  La fréquence centrale est lue dans le nom
-du fichier quand il contient « _7100000Hz ».
+WAV acceptés : PCM 8 ou 16 bits et flottant 32 bits, comme les fichiers produits
+par SDR# ou par RadioLab.  Le .cf32 est de l'I/Q complexe 32 bits brut, sans en-tête :
+le débit doit alors être donné via `sample_rate` (sinon 1 MS/s).  La fréquence
+centrale est lue dans le nom du fichier quand il contient « _7100000Hz ».
 """
+import os
 import re
 import struct
 import threading
@@ -38,21 +40,30 @@ def read_wav_header(f):
 class IQFileSource:
     kind = "file"
 
-    def __init__(self, path, loop=True, realtime=True, block=32768):
+    def __init__(self, path, loop=True, realtime=True, block=32768, sample_rate=None):
         self.path, self.loop, self.realtime, self.block = path, loop, realtime, block
         self.f = open(path, "rb")
-        tag, channels, rate, bits, self.data_start, self.data_size = read_wav_header(self.f)
-        if channels != 2:
-            raise ValueError("un fichier I/Q doit être stéréo (I à gauche, Q à droite)")
-        if (tag, bits) == (1, 16):
-            self.dtype, self.scale, self.bias = np.dtype("<i2"), 1 / 32768.0, 0.0
-        elif (tag, bits) == (1, 8):
-            self.dtype, self.scale, self.bias = np.dtype("u1"), 1 / 128.0, -1.0
-        elif (tag, bits) == (3, 32):
-            self.dtype, self.scale, self.bias = np.dtype("<f4"), 1.0, 0.0
+        if path.lower().endswith(".cf32"):
+            # .cf32 (SDR#) : I/Q complexe 32 bits little-endian, brut, sans en-tête
+            self.dtype, self.scale, self.bias = np.dtype("<c8"), 1.0, 0.0
+            self.data_start = 0
+            self.f.seek(0, 2)
+            self.data_size = self.f.tell()
+            self.f.seek(0)
+            self.sample_rate = int(sample_rate or 1_000_000)
         else:
-            raise ValueError("format WAV non géré (%d bits, type %d)" % (bits, tag))
-        self.sample_rate = int(rate)
+            tag, channels, rate, bits, self.data_start, self.data_size = read_wav_header(self.f)
+            if channels != 2:
+                raise ValueError("un fichier I/Q doit être stéréo (I à gauche, Q à droite)")
+            if (tag, bits) == (1, 16):
+                self.dtype, self.scale, self.bias = np.dtype("<i2"), 1 / 32768.0, 0.0
+            elif (tag, bits) == (1, 8):
+                self.dtype, self.scale, self.bias = np.dtype("u1"), 1 / 128.0, -1.0
+            elif (tag, bits) == (3, 32):
+                self.dtype, self.scale, self.bias = np.dtype("<f4"), 1.0, 0.0
+            else:
+                raise ValueError("format WAV non géré (%d bits, type %d)" % (bits, tag))
+            self.sample_rate = int(rate)
         self.sample_rates = [self.sample_rate]
         m = re.search(r"_(\d{4,11})Hz", path)
         self.center_hz = float(m.group(1)) if m else 0.0
@@ -61,7 +72,7 @@ class IQFileSource:
         self._thread = None
         self.paused = False
         self._lock = threading.Lock()                     # la lecture et les déplacements viennent de deux fils différents
-        self.frame_bytes = 2 * self.dtype.itemsize
+        self.frame_bytes = self.dtype.itemsize if self.dtype.kind == "c" else 2 * self.dtype.itemsize
         self.f.seek(0, 2)
         self.data_size = max(min(self.data_size, self.f.tell() - self.data_start), 0)
         self.f.seek(self.data_start)
@@ -86,9 +97,11 @@ class IQFileSource:
         with self._lock:
             left = self.data_start + self.data_size - self.f.tell()
             raw = self.f.read(max(min(self.block * self.frame_bytes, left), 0))
-        raw = raw[:len(raw) - len(raw) % (2 * self.dtype.itemsize)]
+        raw = raw[:len(raw) - len(raw) % self.frame_bytes]
         if not raw:
             return None
+        if self.dtype.kind == "c":                       # .cf32 : déjà complexe
+            return np.frombuffer(raw, dtype=self.dtype).astype(np.complex64)
         x = np.frombuffer(raw, dtype=self.dtype).astype(np.float32) * self.scale + self.bias
         return x.view(np.complex64)
 

@@ -10,6 +10,7 @@ dans son propre fil d'exécution.
 """
 import queue
 import socketserver
+import sys
 import threading
 
 TO_HAMLIB = {"NFM": "FM", "WFM": "WFM", "AM": "AM", "USB": "USB", "LSB": "LSB", "CW": "CW"}
@@ -115,3 +116,149 @@ class RigCtlServer:
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+
+
+# ------------------------------------------------------------------ CAT série
+# Mêmes commandes texte rigctl, mais sur un port COM série (pour Gpredict en
+# « rig série », OmniRig, ou tout client CAT texte).  Windows : ctypes pur
+# (CreateFile sur COMn, 8N1, pas de dépendance) ; ailleurs : pyserial si présent.
+
+_GENERIC_READ, _GENERIC_WRITE, _OPEN_EXISTING = 0x80000000, 0x40000000, 3
+_INVALID_HANDLE = -1
+
+
+def _open_com_windows(port, baud):
+    """Ouvre un port COM (ex. 'COM3') en 8N1 via ctypes. Retourne le handle."""
+    import ctypes
+
+    k = ctypes.windll.kernel32
+    h = k.CreateFileW("\\\\.\\" + port, _GENERIC_READ | _GENERIC_WRITE, 0, None, _OPEN_EXISTING, 0, None)
+    if h in (None, _INVALID_HANDLE):
+        raise OSError("ouverture de %s impossible (handle invalide)" % port)
+    dcb = bytearray(28)                                   # DCB : 28 octets
+    ctypes.windll.kernel32.GetCommState(h, dcb)
+    struct_pack_into(dcb, 4, baud)                        # BaudRate
+    struct_pack_into(dcb, 8, 1)                           # fBinary = 1 (le reste à 0)
+    dcb[20] = 8                                           # ByteSize
+    dcb[21] = 0                                           # Parity = NOPARITY
+    dcb[22] = 0                                           # StopBits = ONESTOPBIT
+    if not ctypes.windll.kernel32.SetCommState(h, dcb):
+        k.CloseHandle(h)
+        raise OSError("SetCommState a échoué sur %s" % port)
+    timeouts = bytearray(20)                              # COMMTIMEOUTS
+    struct_pack_into(timeouts, 0, 50)                     # ReadIntervalTimeout (max)
+    struct_pack_into(timeouts, 4, 0)                      # ReadTotalTimeoutMultiplier
+    struct_pack_into(timeouts, 8, 100)                    # ReadTotalTimeoutConstant
+    ctypes.windll.kernel32.SetCommTimeouts(h, timeouts)
+    ctypes.windll.kernel32.PurgeComm(h, 0x0C)             # TXABORT | RXABORT : on vide les files
+    return h
+
+
+def struct_pack_into(buf, offset, value):
+    import struct
+
+    struct.pack_into("<I", buf, offset, value)
+
+
+def _com_read(h, n=256):
+    import ctypes
+
+    buf = ctypes.create_string_buffer(n)
+    got = ctypes.c_ulong(0)
+    if not ctypes.windll.kernel32.ReadFile(h, buf, n, ctypes.byref(got), None):
+        return b""
+    return buf.raw[:got.value]
+
+
+def _com_write(h, data):
+    import ctypes
+
+    got = ctypes.c_ulong(0)
+    ctypes.windll.kernel32.WriteFile(h, data, len(data), ctypes.byref(got), None)
+    return got.value
+
+
+class SerialCatServer:
+    """Serveur CAT sur port série : mêmes commandes texte rigctl que RigCtlServer.
+
+    `handle_line()` est séparé du transport : testable sans matériel.
+    Les ordres reçus vont dans `self.commands` (file), comme RigCtlServer.
+    """
+
+    def __init__(self, get_state, port="COM3", baud=9600, autostart=True):
+        self.get_state, self.port, self.baud = get_state, port, int(baud)
+        self.commands = queue.Queue()
+        self.error = None
+        self._stop = threading.Event()
+        self._tr = None
+        self._thread = None
+        if autostart:
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+
+    def handle_line(self, line):
+        """Réponse à une ligne de commande (None = fermer la connexion)."""
+        return answer(line, self.get_state, self.commands)
+
+    def _open(self):
+        if sys.platform == "win32":
+            return ("com", _open_com_windows(self.port, self.baud))
+        import serial                                     # pyserial, hors Windows
+
+        return ("py", serial.Serial(self.port, self.baud, bytesize=8, parity="N", stopbits=1, timeout=0.2))
+
+    def _read(self, tr, n=256):
+        if tr[0] == "com":
+            return _com_read(tr[1], n)
+        return tr[1].read(n) or b""
+
+    def _write(self, tr, data):
+        if tr[0] == "com":
+            _com_write(tr[1], data)
+        else:
+            tr[1].write(data)
+
+    def _run(self):
+        try:
+            self._tr = self._open()
+        except Exception as e:
+            self.error = "%s: %s" % (self.port, e)
+            return
+        buf = b""
+        try:
+            while not self._stop.is_set():
+                chunk = self._read(self._tr)
+                if chunk:
+                    buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    reply = self.handle_line(line.decode("ascii", "replace"))
+                    if reply is None:
+                        return
+                    self._write(self._tr, reply.encode("ascii"))
+        except Exception as e:
+            if not self._stop.is_set():
+                self.error = "%s: %s" % (self.port, e)
+        finally:
+            self._close()
+
+    def _close(self):
+        tr, self._tr = self._tr, None
+        if tr is None:
+            return
+        try:
+            if tr[0] == "com":
+                import ctypes
+
+                ctypes.windll.kernel32.CloseHandle(tr[1])
+            else:
+                tr[1].close()
+        except Exception:
+            pass
+
+    def close(self):
+        self._stop.set()
+        self._close()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None

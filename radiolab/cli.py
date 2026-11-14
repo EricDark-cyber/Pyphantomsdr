@@ -25,9 +25,11 @@ def main(argv=None):
     p.add_argument("--nr-method", default="lsa", choices=["lsa", "wiener", "specsub", "lms"])
     p.add_argument("--nr-level", type=float, default=18.0, help="réduction maximale en dB")
     p.add_argument("--anf", action="store_true", help="notch automatique")
+    p.add_argument("--rate", type=float, default=None,
+                   help="débit (S/s) d'un fichier .cf32, qui n'a pas d'en-tête (défaut 1000000)")
     a = p.parse_args(argv)
 
-    src = IQFileSource(a.iq_file, loop=False, realtime=False)
+    src = IQFileSource(a.iq_file, loop=False, realtime=False, sample_rate=a.rate)
     rx = Receiver(src.sample_rate)
     rx.set_mode(a.mode)
     rx.set_offset(a.freq - src.center_hz if a.freq is not None else a.offset)

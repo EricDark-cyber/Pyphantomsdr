@@ -52,7 +52,7 @@ from .dsp.adsb import ADSBDecoder, decode_adsb_payload
 from .dsp.modes import decode_mode_s
 from .dsp.acars import ACARSDecoder
 from .dsp.ais import AISDecoder
-from .netcontrol import RigCtlServer
+from .netcontrol import RigCtlServer, SerialCatServer
 from . import planner
 
 from .widgets import *        # noqa: F401,F403  (constantes, thème et petits éléments d'interface)
@@ -139,6 +139,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scanner = Scanner(radio)
         self.scheduler = planner.Scheduler(cfg.setdefault("jobs", []))
         self.net = None
+        self.cat = None
         self.net_port = 4532
         self.notch_values = []
         self._was_holding = False
@@ -878,6 +879,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rec_iq = QtWidgets.QPushButton("● I/Q"); self.rec_iq.setCheckable(True)
         self.rec_iq.toggled.connect(lambda on: self.on_record(on, True))
         lay.addWidget(self.rec_audio); lay.addWidget(self.rec_iq)
+        lay.addWidget(QtWidgets.QLabel("Format I/Q :"))
+        self.iq_fmt = QtWidgets.QComboBox()
+        self.iq_fmt.addItems(["WAV 16 bits", "CF32 (SDR#)"])
+        self.iq_fmt.setCurrentIndex(1 if self.cfg.get("iq_format") == "cf32" else 0)
+        self.iq_fmt.currentIndexChanged.connect(self.on_iq_fmt)
+        lay.addWidget(self.iq_fmt)
         panel.addStretch(1)
 
         box = Section("Mémoires"); lay = QtWidgets.QVBoxLayout(box); mem_tab.addWidget(box, 1)
@@ -1102,6 +1109,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.net_box.toggled.connect(self.on_net)
         form.addRow(self.net_box)
 
+        box = Section("CAT série"); form = QtWidgets.QFormLayout(box); tools_tab.addWidget(box)
+        self.cat_box = QtWidgets.QCheckBox("Serveur CAT texte sur port COM (Gpredict série, OmniRig)")
+        self.cat_box.toggled.connect(self.on_cat)
+        self.cat_port = QtWidgets.QLineEdit(str(self.cfg.get("cat_port", "COM3")))
+        self.cat_baud = QtWidgets.QComboBox()
+        self.cat_baud.addItems(["4800", "9600", "19200", "38400", "57600", "115200"])
+        self.cat_baud.setCurrentText(str(self.cfg.get("cat_baud", 9600)))
+        self.cat_port.editingFinished.connect(self.on_cat_params)
+        self.cat_baud.currentTextChanged.connect(self.on_cat_params)
+        form.addRow(self.cat_box); form.addRow("Port COM", self.cat_port); form.addRow("Baud", self.cat_baud)
+
         box = Section("Enregistrements programmés"); lay = QtWidgets.QVBoxLayout(box); tools_tab.addWidget(box, 1)
         self.job_list = QtWidgets.QListWidget()
         row = QtWidgets.QHBoxLayout()
@@ -1185,11 +1203,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fail("Airspy", e)
 
     def open_file(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Fichier I/Q", self.cfg["record_dir"], "WAV I/Q (*.wav)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Fichier I/Q", self.cfg["record_dir"], "I/Q (*.wav *.cf32)")
         if not path:
             return
         try:
-            src = IQFileSource(path, loop=True, realtime=True)
+            rate = None
+            if path.lower().endswith(".cf32"):            # .cf32 n'a pas d'en-tête : demander le débit
+                rate = int(self.cfg.get("file_rate") or 0)
+                if not rate:
+                    rate, ok = QtWidgets.QInputDialog.getInt(self, "Fichier .cf32", "Débit en S/s :",
+                                                             1_000_000, 1_000, 100_000_000, 1_000)
+                    if not ok:
+                        return
+                    self.cfg["file_rate"] = rate
+                    save_config(self.cfg)
+            src = IQFileSource(path, loop=True, realtime=True, sample_rate=rate)
             self.radio.decimation = self.pick_decimation(src.sample_rate)
             self.radio.set_source(src)
             self.after_source(src.center_hz)
@@ -1897,13 +1925,40 @@ class MainWindow(QtWidgets.QMainWindow):
             return self.radio.vfo_hz, self.radio.rx.mode, self.radio.rx.hi - self.radio.rx.lo, self.radio.rx.level_db
         return float(self.freq.value()), self.cfg["mode"], 0.0, -100.0
 
+    def on_cat(self, on):
+        if self.cat is not None:
+            self.cat.close()
+            self.cat = None
+        if on:
+            port = self.cat_port.text().strip() or "COM3"
+            try:
+                self.cat = SerialCatServer(self.net_state, port=port, baud=int(self.cat_baud.currentText()))
+                if self.cat.error:
+                    raise OSError(self.cat.error)
+            except Exception as e:
+                self.cat_box.setChecked(False)
+                self.fail("CAT série", "%s : %s" % (port, e))
+
+    def on_cat_params(self, *_):
+        self.cfg["cat_port"] = self.cat_port.text().strip() or "COM3"
+        self.cfg["cat_baud"] = int(self.cat_baud.currentText())
+        save_config(self.cfg)
+        if self.cat_box.isChecked():                      # rouvre le port avec les nouveaux réglages
+            self.on_cat(False)
+            self.on_cat(True)
+
+    def on_iq_fmt(self, idx):
+        self.cfg["iq_format"] = "cf32" if idx == 1 else "wav"
+        save_config(self.cfg)
+
     def run_net_commands(self):
-        while self.net is not None and not self.net.commands.empty():
-            kind, value = self.net.commands.get_nowait()
-            if kind == "freq":
-                self.tune(value)
-            elif kind == "mode":
-                self.on_mode(value)
+        for srv in (self.net, self.cat):
+            while srv is not None and not srv.commands.empty():
+                kind, value = srv.commands.get_nowait()
+                if kind == "freq":
+                    self.tune(value)
+                elif kind == "mode":
+                    self.on_mode(value)
 
     # --------------------------------------------- enregistrements programmés
     def refresh_jobs(self):
@@ -1943,7 +1998,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.lock.setChecked(False)
                     self.on_mode(job["mode"])
                     self.tune(float(job["hz"]))
-                    path = self.radio.start_recording(self.cfg["record_dir"], job["iq"])
+                    path = self.radio.start_recording(self.cfg["record_dir"], job["iq"], fmt=self.cfg.get("iq_format") if job["iq"] else None)
                     self.status.showMessage("Enregistrement programmé : %s" % path)
                 elif self.ready():
                     self.radio.stop_recording(job["iq"])
@@ -2186,7 +2241,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             if on:
-                path = self.radio.start_recording(self.cfg["record_dir"], iq)
+                path = self.radio.start_recording(self.cfg["record_dir"], iq, fmt=self.cfg.get("iq_format") if iq else None)
                 self.status.showMessage("Enregistrement : %s" % path)
             else:
                 self.radio.stop_recording(iq)
@@ -2676,6 +2731,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.stop()
         if self.net is not None:
             self.net.close()
+        if self.cat is not None:
+            self.cat.close()
         self.cfg["vfo_hz"] = self.freq.value()
         try:
             self.cfg["panel_sizes"] = self.splitter.sizes()
