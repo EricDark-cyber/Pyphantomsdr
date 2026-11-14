@@ -131,4 +131,4 @@ class Cf32Writer:
 def recording_name(folder, center_hz, iq, ext="wav"):
     """Nom compatible avec la convention de SDR# (la fréquence est relue à l'ouverture)."""
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%SZ")
-    return "%s/PyPhantom_%s_%dHz_%s.%s" % (folder, stamp, int(round(center_hz)), "IQ" if iq else "AF", ext)
+    return "%s/RadioLab_PyPhantom_%s_%dHz_%s.%s" % (folder, stamp, int(round(center_hz)), "IQ" if iq else "AF", ext)

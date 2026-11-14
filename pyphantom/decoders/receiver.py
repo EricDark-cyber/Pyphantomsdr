@@ -213,7 +213,7 @@ class Receiver:
 
     def _make_digi(self):
         self.digi = None
-        wanted = ("NFM",) if self.digi_kind == "APRS1200" else ("USB", "LSB", "CW")
+        wanted = ("NFM",) if self.digi_kind in ("APRS1200", "DMR", "DSTAR", "C4FM") else ("USB", "LSB", "CW")
         if self.digi_kind == "SSTV":                          # la SSTV existe aussi en FM (station spatiale, relais)
             wanted += ("NFM",)
         if self.mode == "TETRA":

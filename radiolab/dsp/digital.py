@@ -136,39 +136,69 @@ class DCSDetector:
         self.code = None                      # (code, inversé) ou None
         self.hits = collections.deque(maxlen=20)
         self.since = 0
+        self.nbits = 0
+        self.first_seen = {}                    # verrou de phase du mot de 23 bits
 
     def process(self, audio):
         for bit in self.slicer.process(self.lp.process(audio.astype(np.float32, copy=False))):
             self.reg = ((self.reg >> 1) | (int(bit) << 22)) & 0x7FFFFF  # le premier bit reçu finit en position 0
             self.since += 1
+            self.nbits += 1
+            if self.nbits < 23:                   # avant un mot complet, la fenetre est trompeuse
+                continue
             hit = None
-            for inverted in (False, True):          # polarité NORMALE d'abord
+            best = None
+            for inverted in (False, True):          # on teste les deux polarités, on garde la meilleure
                 word = self.reg ^ 0x7FFFFF if inverted else self.reg
                 data, nerr = golay_decode(word)
-                if nerr <= self.MAX_CORRECT:
-                    code = _DCS_BY_DATA.get(data)
+                if nerr > self.MAX_CORRECT:
+                    continue
+                code = _DCS_BY_DATA.get(data)
+                inv = inverted
+                if code is None:
+                    # le complémentaire d'un mot de code Golay est un mot de code : un signal inversé
+                    # se lit aussi en polarité normale, avec les 12 bits de données complémentés
+                    code = _DCS_BY_DATA.get(data ^ 0xFFF)
                     if code is not None:
-                        hit = (code, inverted)
-                        break
-            if hit is not None:
+                        inv = not inverted
+                if code is not None and (best is None or nerr < best[0]):
+                    best = (nerr, code, inv)
+            if best is not None:
+                hit = (best[1], best[2], best[0])
+                cand = (hit[0], hit[1])
+                if cand not in self.first_seen:
+                    self.first_seen[cand] = self.nbits   # le vrai mot (phase 0) arrive en premier dans chaque période
                 self.hits.append(hit)
                 self.since = 0
                 self._decide()
             if self.since > 23 * 6:                                 # plus rien de valable depuis une seconde
                 self.code = None
                 self.hits.clear()
+                self.first_seen.clear()
 
     def _decide(self):
-        # Un code DCS normal produit le même signal que le code « équivalent inversé » : on
-        # lève l'ambiguïté en privilégiant toujours la polarité normale.
-        counts = collections.Counter(self.hits)
-        best_n = max((h for h in counts if not h[1]), key=lambda h: counts[h], default=None)
-        if best_n is not None and counts[best_n] >= self.CONFIRM:
-            self.code = best_n
+        # Un code DCS normal et son inverse peuvent paraitre identiques (rotation du mot de 23 bits) :
+        # on departage au nombre de mots decodes SANS erreur (nerr == 0), puis au nombre total de
+        # lectures, puis a la somme des erreurs (la vraie phase ne corrige jamais rien), puis on
+        # prefere la polarite normale a egalite complete.
+        counts = collections.Counter()
+        zeros = collections.Counter()
+        errs = collections.Counter()
+        for code, inv, nerr in self.hits:
+            h = (code, inv)
+            counts[h] += 1
+            errs[h] += nerr
+            if nerr == 0:
+                zeros[h] += 1
+
+        def key(h):
+            return (zeros[h], counts[h], -errs[h], -self.first_seen.get(h, 1 << 60), not h[1])
+
+        if not counts:
             return
-        best_i = max((h for h in counts if h[1]), key=lambda h: counts[h], default=None)
-        if best_i is not None and counts[best_i] >= self.CONFIRM:
-            self.code = best_i
+        best = max(counts, key=key)
+        if counts[best] >= self.CONFIRM:
+            self.code = best
 
     def label(self):
         if self.code is None:

@@ -1,10 +1,10 @@
-"""Point d'entree de PyPhantom SDR : lance l'interface (port complet de RadioLab 0.15).
+"""Point d'entrée de PyPhantom SDR : lance l'interface (port complet de RadioLab 0.15).
 
-Lancer depuis la racine du depot :  python -m pyphantom
-Le recepteur Airspy R2 est pilote en ctypes sur airspy.dll (fourni a la racine du depot,
-avec libusb-1.0.dll et pthreadVC2.dll) : aucune installation de PothosSDR/SoapySDR n'est
-requise. Un fichier I/Q peut etre ouvert depuis le menu (ou en ligne de commande :
-python -m radiolab.cli fichier.wav --freq 7100000 --mode USB -o audio.wav).
+Lancer depuis la racine du dépôt :  python -m pyphantom [--iq fichier.wav|.cf32] [--rate S/s]
+Le récepteur Airspy R2 est piloté en ctypes sur airspy.dll (fourni à la racine du dépôt,
+avec libusb-1.0.dll et pthreadVC2.dll) : aucune installation de PothosSDR/SoapySDR
+n'est requise. Un fichier I/Q (.cf32 de SDR# ou WAV) peut être ouvert au lancement
+avec --iq, ou depuis le menu « Ouvrir un fichier I/Q… ».
 """
 import sys
 
@@ -12,7 +12,7 @@ import sys
 def main() -> int:
     from radiolab.gui import main as radiolab_main
 
-    return radiolab_main()
+    return radiolab_main(sys.argv[1:])
 
 
 if __name__ == "__main__":

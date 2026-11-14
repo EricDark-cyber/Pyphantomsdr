@@ -52,7 +52,8 @@ class Baseband:
         n = len(audio)
         lo = np.exp(-1j * (self.phi + w * np.arange(n))).astype(np.complex64)
         self.phi = float((self.phi + w * n) % (2 * np.pi))
-        return self.fir.process(audio.astype(np.float32, copy=False) * lo)
+        # on garde le complexe : jeter la partie imaginaire ici (astype float32) casserait le signal
+        return self.fir.process(np.asarray(audio) * lo)
 
 
 class PSKDecoder:
@@ -293,6 +294,24 @@ class CWDecoder:
 KINDS = ("RTTY45", "RTTY50", "PSK31", "PSK63", "CW", "PACKET300", "APRS1200", "NAVTEX", "FAX", "SSTV", "WSPR", "FT8", "FT4", "GOLAY", "HELL", "DCF77", "ALS162")
 
 
+def _audio_decoder(dec, emit):
+    """Adapte un décodeur qui RETOURNE une liste de messages en décodeur à callback `emit`
+    (le receiver appelle digi.process() sans lire la valeur de retour)."""
+    orig = dec.process
+
+    def process(audio):
+        try:
+            r = orig(audio)
+        except Exception:
+            return
+        if r:
+            for m in r:
+                emit(str(m))
+
+    dec.process = process
+    return dec
+
+
 def make_decoder(kind, fs, center, emit, mark_high=True):
     if kind == "PSK31":
         return PSKDecoder(fs, center, 31.25, emit)
@@ -305,8 +324,8 @@ def make_decoder(kind, fs, center, emit, mark_high=True):
     if kind == "CW":
         return CWDecoder(fs, center, emit)
     if kind == "NAVTEX":                          # le sens des deux fréquences est trouvé automatiquement
-        from .navtex import NavtexDecoder
-        return NavtexDecoder(fs, center, emit)
+        from .navtex import NAVTEXDecoder
+        return _audio_decoder(NAVTEXDecoder(fs, center, emit), emit)
     if kind == "FAX":                             # images : la note audio va de 1500 Hz (noir) à 2300 Hz (blanc)
         from .pictures import FaxDecoder
         return FaxDecoder(fs, emit)
@@ -324,19 +343,42 @@ def make_decoder(kind, fs, center, emit, mark_high=True):
         return ALS162Decoder(fs, center, emit)
     if kind == "WSPR":                            # balises de faible puissance, autour de 1500 Hz audio
         from .wspr import WSPRDecoder
-        d = WSPRDecoder(fs)                       # WSPRDecoder ne prend que fs (retourne les messages via process)
-        d.emit = emit
-        return d
+        return WSPRDecoder(fs, emit)              # le décodeur WSPR émet directement via le callback
     if kind in ("FT8", "FT4"):
         from .ft8 import FT8Decoder, FT4Decoder
         return FT4Decoder(fs, emit, center) if kind == "FT4" else FT8Decoder(fs, emit, center=center)
     if kind == "GOLAY":
         from .golay import GolayDecoder
-        return GolayDecoder(fs, emit, center)
+        return _audio_decoder(GolayDecoder(), emit)
     if kind == "PACKET300":                       # packet HF : deux tonalités à 200 Hz d'écart, autour de `center`
         from .packet import AFSKDecoder
         return AFSKDecoder(fs, 300.0, center - 100.0, center + 100.0, emit)
     if kind == "APRS1200":                        # APRS / packet VHF (Bell 202), reçu en FM étroite
         from .packet import AFSKDecoder
         return AFSKDecoder(fs, 1200.0, 1200.0, 2200.0, emit)
+    # décodeurs "audio" du menu qui retournent leurs messages (liste) plutôt que par callback
+    if kind == "JS8":
+        from .js8 import JS8Decoder
+        return _audio_decoder(JS8Decoder(fs), emit)
+    if kind == "JT65":
+        from .jt65 import JT65Decoder
+        return _audio_decoder(JT65Decoder(fs), emit)
+    if kind == "M17":
+        from .m17 import M17Decoder
+        return _audio_decoder(M17Decoder(fs), emit)
+    if kind == "DSTAR":
+        from .dstar import DStarDecoder
+        return _audio_decoder(DStarDecoder(fs), emit)
+    if kind == "DMR":
+        from .dmr import DMRDecoder
+        return _audio_decoder(DMRDecoder(fs), emit)
+    if kind == "C4FM":
+        from .c4fm import C4FMDecoder
+        return _audio_decoder(C4FMDecoder(fs), emit)
+    if kind == "OLIVIA":
+        from .olivia import OliviaDecoder
+        return _audio_decoder(OliviaDecoder(fs), emit)
+    if kind == "CONTESTIA":
+        from .contestia import ContestiaDecoder
+        return _audio_decoder(ContestiaDecoder(fs), emit)
     return None

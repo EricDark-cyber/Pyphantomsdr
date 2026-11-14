@@ -21,6 +21,14 @@ class Any(metaclass=_Meta):
             raise AttributeError(name)
         return Any()
     def __call__(self, *a, **k): return Any()
+    def __or__(self, other): return self
+    def __ror__(self, other): return self
+    def __and__(self, other): return self
+    def __rand__(self, other): return self
+    def __invert__(self): return self
+    def __int__(self): return 0
+    def __index__(self): return 0
+    def __bool__(self): return True
 
 
 class Signal:
@@ -30,11 +38,22 @@ class Signal:
         for f in list(self.slots): f(*a)
 
 
+class Callable(Any):
+    """Attribut inconnu d'un faux widget : à la fois appelable et signal (connect/emit)."""
+    def __init__(self): self.slots = []
+    def __call__(self, *a, **k): return Any()
+    def connect(self, f): self.slots.append(f)
+    def emit(self, *a):
+        for f in list(self.slots): f(*a)
+
+
 class Widget(Any):
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
-        return lambda *a, **k: Any()
+        c = Callable()
+        self.__dict__[name] = c          # mis en cache : connect puis emit retrouvent les slots
+        return c
 
 
 class Valued(Widget):
@@ -75,7 +94,9 @@ class Button(Widget):
 
 
 class Combo(Widget):
-    def __init__(self, *a, **k): self.items, self._i, self.currentIndexChanged = [], -1, Signal()
+    def __init__(self, *a, **k):
+        self.items, self._i = [], -1
+        self.currentIndexChanged, self.currentTextChanged = Signal(), Signal()
     def addItem(self, label, data=None):
         self.items.append((label, data))
         if self._i < 0: self.setCurrentIndex(0)
@@ -83,7 +104,8 @@ class Combo(Widget):
     def currentIndex(self): return self._i
     def setCurrentIndex(self, i):
         if i != self._i:
-            self._i = i; self.currentIndexChanged.emit(i)
+            self._i = i; self.currentIndexChanged.emit(i); self.currentTextChanged.emit(self.currentText())
+    def currentText(self): return self.items[self._i][0] if 0 <= self._i < len(self.items) else ""
     def itemData(self, i): return self.items[i][1]
     def count(self): return len(self.items)
     def setItemData(self, i, value, role=None): pass
@@ -115,7 +137,9 @@ class TextEdit(Widget):
 
 
 class ListWidget(Widget):
-    def __init__(self, *a, **k): self.rows, self._row, self.itemDoubleClicked = [], -1, Signal()
+    def __init__(self, *a, **k):
+        self.rows, self._row = [], -1
+        self.itemDoubleClicked, self.itemClicked = Signal(), Signal()
     def count(self): return len(self.rows)
     def clear(self): self.rows = []
     def addItem(self, s): self.rows.append(s)

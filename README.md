@@ -32,7 +32,8 @@ pyphantom/
 │   ├── ft8/               # décodeur FT8/FT4 intégré (LDPC + CRC-14 + unpack WSJT-X)
 │   ├── spectrum.py        # fenêtres d'analyse + spectre/zoom (utilisé aussi par filters.py)
 │   ├── decoders/          # décodeurs : ADS-B/ModeS+CPR, AIS(GMSK), Olivia/Contestia, PSK31, RTTY, WSPR, packet AX.25, SSTV/fax/Hell (PNG), TETRA, POCSAG/DCS, CTCSS, RDS, SIGMET, DCF77/Allouis, FEC, EKF, AudioFX, réduction de bruit (noise blanker, Kalman, NLMS, NR spectrale), Receiver complet
-│   └── gui/               # ancienne interface (bibliothèque pyphantom conservée)
+│   └── gui/               # ANCIENNE interface (bibliothèque pyphantom conservée telle quelle,
+│                          #  non utilisée au lancement : l'UI active est radiolab/gui.py)
 ├── tests/test_dsp.py      # tests hors-ligne du DSP (signaux synthétiques)
 ├── tests/test_filters.py  # tests des filtres en flux (équivalence morcelé / d'un coup)
 ├── tests/test_ft8.py      # tests du décodeur FT8 (aller-retour audio 8-FSK complet)
@@ -122,6 +123,36 @@ se donne avec `--rate` (un .cf32 n'a pas d'en-tête) ou est demandé à l'ouvert
 - **Anti-bruit** : NB (impulsions), NR spectrale (Wiener/MMSE-LSA/LMS), ANF (notch auto des porteuses).
 - **Mémoires** : import/export CSV (nom ; fréquence Hz ; mode ; groupe).
 
+### Raccourcis clavier (aussi affichés avec **F1**)
+
+| Touche | Action |
+|---|---|
+| → / ← | fréquence : un pas vers le haut / le bas |
+| Ctrl + → / Ctrl + ← | fréquence : dix pas |
+| Page haut / Page bas | mode suivant / précédent |
+| Espace | couper / rétablir le son |
+| M | mémoriser la fréquence |
+| R | enregistrer le son (marche / arrêt) |
+| L | verrouiller la fréquence |
+| P | fichier I/Q : pause / lecture |
+| F1 | afficher cette liste |
+
+### Dépannage
+
+- **L'Airspy n'apparaît pas / « aucun périphérique »** : installez le pilote **WinUSB** avec
+  [Zadig](https://zadig.akeo.ie/) (sélectionnez l'Airspy, WinUSB, Replace Driver), fermez
+  SDR# ou tout autre logiciel qui l'occupe, puis relancez. Les DLL `airspy.dll`,
+  `libusb-1.0.dll`, `pthreadVC2.dll` doivent être à côté du programme (elles sont à la racine
+  du dépôt et embarquées dans l'exe fabriqué).
+- **Le Spyverter n'est pas vu en HF** : cochez *Spyverter (+120 MHz)* et *Bias-tee* ; la
+  fréquence affichée = fréquence réelle + 120 MHz.
+- **Un autre logiciel (SDR#, RadioLab) ne marche plus** : le pilote WinUSB est pris par
+  PyPhantom — quittez PyPhantom, ou réinstallez le pilote d'origine avec Zadig.
+- **Audio haché** : montez la latence (Outils) ou décochez les réducteurs de bruit lourds
+  activés en même temps (NR spectrale + LMS + Kalman + NeuralNR).
+- **.cf32 illisible** : indiquez le débit à l'ouverture (`--rate` ou boîte de dialogue).
+- **Fabriquer un .exe** : `fabriquer_exe.bat` (voir PyPhantom.spec) produit `dist\PyPhantom\`.
+
 ## Décodage FT8 / FT4 (intégré)
 
 Le panneau **« FT8 / FT4 (décodeur intégré) »** (à droite) décode les messages FT8/FT4
@@ -162,10 +193,13 @@ python tests/test_radiolab_port.py
 python tests/test_cf32_cat.py
 ```
 
-Banc de tests pytest du port RadioLab 0.15 (nécessite `pip install pytest`) :
+Banc de tests pytest (nécessite `pip install pytest` ; aucun besoin de PySide6, un faux Qt
+est injecté) — exécuté aussi en CI (`.github/workflows/tests.yml`) :
 ```bat
+python -m pytest tests -q
 python -m pytest tests_radiolab -q
 ```
+(les lancer séparément : les deux dossiers contiennent des modules de même nom)
 
 `test_dsp.py` teste hors-ligne les démodulateurs AM/NFM/USB/LSB/CW, le rééchantillonnage,
 le spectre et le S-mètre sur des signaux synthétiques. `test_filters.py` vérifie les

@@ -1000,7 +1000,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            ("APRS / packet VHF 1200 bauds (en NFM)", "APRS1200"),
                            ("NAVTEX (518 et 490 kHz)", "NAVTEX"), ("Fax météo HF", "FAX"),
                            ("SSTV (images des radioamateurs)", "SSTV"),
-                           ("Hellschreiber (texte en image)", "HELL"), ("WSPR (balises, autour de 1500 Hz)", "WSPR"), ("FT8 (signaux faibles)", "FT8"), ("FT4 (signaux faibles)", "FT4"), ("JS8Call (texte libre)", "JS8"), ("Olivia (HF robuste)", "OLIVIA"), ("Contestia (concours)", "CONTESTIA"), ("JT65 (DX faible)", "JT65"), ("DMR (numérique)", "DMR"), ("D-STAR (numérique)", "DSTAR"), ("C4FM (Yaesu)", "C4FM"), ("M17 (libre)", "M17"), ("Golay (24,12)", "GOLAY"),
+                           ("Hellschreiber (texte en image)", "HELL"), ("WSPR (balises, autour de 1500 Hz)", "WSPR"), ("FT8 (signaux faibles)", "FT8"), ("FT4 (signaux faibles)", "FT4"), ("JS8Call (expérimental)", "JS8"), ("Olivia (HF robuste)", "OLIVIA"), ("Contestia (concours)", "CONTESTIA"), ("JT65 (DX faible)", "JT65"), ("DMR (numérique)", "DMR"), ("D-STAR (numérique)", "DSTAR"), ("C4FM (Yaesu)", "C4FM"), ("M17 (libre)", "M17"), ("Golay (24,12)", "GOLAY"),
                            ("Heure : DCF77 (77,5 kHz)", "DCF77"), ("Heure : Allouis (162 kHz)", "ALS162")):
             self.digi_kind.addItem(label, key)
         self.digi_kind.currentIndexChanged.connect(self.on_decoders)
@@ -1204,11 +1204,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def open_file(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Fichier I/Q", self.cfg["record_dir"], "I/Q (*.wav *.cf32)")
-        if not path:
-            return
+        if path:
+            self.open_iq(path)
+
+    def open_iq(self, path, rate=None):
         try:
-            rate = None
-            if path.lower().endswith(".cf32"):            # .cf32 n'a pas d'en-tête : demander le débit
+            if path.lower().endswith(".cf32") and not rate:            # .cf32 n'a pas d'en-tête : demander le débit
                 rate = int(self.cfg.get("file_rate") or 0)
                 if not rate:
                     rate, ok = QtWidgets.QInputDialog.getInt(self, "Fichier .cf32", "Débit en S/s :",
@@ -1760,8 +1761,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_digi_kind_changed(self, *_):
         kind = self.digi_kind.currentData()
-        if kind in ("FT8", "FT4", "WSPR") and self.digi_center.value() < 1200:
-            self.digi_center.setValue(1500)
+        if kind in ("FT8", "FT4", "WSPR"):
+            if self.digi_center.value() < 1200:
+                self.digi_center.setValue(1500)        # milieu de la bande FT8/WSPR
+        elif self.digi_center.value() == 1500:
+            self.digi_center.setValue(1000)             # retour au centre par défaut des autres modes
 
     def on_decoders(self, *_):
         if self.ready():
@@ -2743,7 +2747,12 @@ class MainWindow(QtWidgets.QMainWindow):
         ev.accept()
 
 
-def main():
+def main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser(prog="pyphantom", description="PyPhantom SDR (port de RadioLab 0.15)")
+    p.add_argument("--iq", default=None, help="fichier I/Q (WAV ou .cf32) à lire en boucle au lancement")
+    p.add_argument("--rate", type=float, default=None, help="débit (S/s) d'un fichier .cf32 (pas d'en-tête)")
+    a = p.parse_args(argv)
     cfg = load_config()
 
     def audio_factory():
@@ -2755,4 +2764,6 @@ def main():
     app.setStyleSheet(STYLE)
     win = MainWindow(Radio(audio_factory=audio_factory), cfg)
     win.show()
+    if a.iq:
+        win.open_iq(a.iq, a.rate)
     return app.exec()
