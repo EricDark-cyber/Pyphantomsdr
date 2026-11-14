@@ -30,6 +30,7 @@ class SpectrumWaterfall(pg.GraphicsLayoutWidget):
         self.wf_img = pg.ImageItem()
         self.wf_plot.addItem(self.wf_img)
         self.wf = np.full((WF_ROWS, WF_COLS), DB_FLOOR, dtype=np.float32)
+        self.wf_img.setImage(self.wf, autoLevels=False, levels=(DB_FLOOR, DB_CEIL))
         self.center = 100e6
         self.fs = 1e6
         self.span = 1e6
@@ -71,7 +72,8 @@ class SpectrumWaterfall(pg.GraphicsLayoutWidget):
         lo = self.center - self.span / 2.0
         hi = self.center + self.span / 2.0
         self.spec_plot.setXRange(lo, hi, padding=0)
-        self.wf_img.setRect(lo, WF_ROWS, self.span, -WF_ROWS)
+        if self.wf_img.image is not None:
+            self.wf_img.setRect(lo, WF_ROWS, self.span, -WF_ROWS)
 
     def set_center(self, center: float) -> None:
         self.center = float(center)
