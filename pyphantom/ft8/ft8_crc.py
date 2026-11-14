@@ -1,47 +1,33 @@
-"""CRC-14 pour FT8 (polynôme WSJT-X).
+"""CRC-14 pour FT8, convention exacte de WSJT-X (chkcrc14a.f90 / get_crc14).
 
-Polynôme : x^14 + x^13 + x^10 + x^9 + x^8 + x^6 + x^4 + x^3 + x^2 + x + 1
-(0x2757)
+Polynome : x^14 + x^13 + x^10 + x^9 + x^8 + x^6 + x^4 + x^3 + x^2 + x + 1 (0x2757).
+WSJT-X calcule le CRC sur les 77 bits du message suivis de 19 bits a zero
+(12 octets lus en b8, le 10e octet masque aux 5 bits utiles), soit le reste
+de msg * x^19 mod p. Vecteur de test officiel (weakmon/WSJT-X) verifie dans
+tests/test_ft8.py.
 """
+
+POLY = 0x2757
 
 
 def crc14(bits):
-    """Calcule le CRC-14 sur une liste de bits.
-
-    bits : liste de 0/1 (77 bits de message)
-    Retourne les 14 bits de CRC.
-    """
-    poly = 0x2757
-    crc = 0
-    for b in bits:
-        crc ^= (b << 13)
-        for _ in range(14):
-            if crc & 0x2000:
-                crc = ((crc << 1) ^ poly) & 0x3FFF
-            else:
-                crc = (crc << 1) & 0x3FFF
-    # Retourne les 14 bits
-    return [(crc >> (13 - i)) & 1 for i in range(14)]
+    """CRC-14 sur les 77 premiers bits (liste de 0/1) -> 14 bits, MSB d'abord."""
+    reg = 0
+    for b in list(bits[:77]) + [0] * 19:
+        reg = ((reg << 1) | int(b)) & 0x7FFF
+        if reg & 0x4000:
+            reg ^= POLY
+    return [(reg >> (13 - i)) & 1 for i in range(14)]
 
 
 def check_crc14(bits):
-    """Vérifie le CRC-14 d'un message de 91 bits (77 + 14).
-
-    bits : liste de 91 bits (77 message + 14 CRC)
-    Retourne True si le CRC est valide.
-    """
+    """Verifie le CRC-14 d'un mot de 91 bits (77 message + 14 CRC)."""
     if len(bits) < 91:
         return False
-    msg = bits[:77]
-    received_crc = bits[77:91]
-    computed = crc14(msg)
-    return received_crc == computed
+    return list(bits[77:91]) == crc14(bits[:77])
 
 
 def add_crc14(bits):
-    """Ajoute le CRC-14 à un message de 77 bits.
-
-    Retourne 91 bits (77 + 14 CRC).
-    """
-    crc = crc14(bits[:77])
-    return list(bits[:77]) + crc
+    """Ajoute le CRC-14 a un message de 77 bits -> 91 bits."""
+    msg = list(bits[:77])
+    return msg + crc14(msg)
