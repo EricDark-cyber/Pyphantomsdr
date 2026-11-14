@@ -33,11 +33,29 @@ pyphantom/
    (Paramètres système → Variables d'environnement).
 3. **Pilote du dongle** : avec [Zadig](https://zadig.akeo.ie/), remplacez le pilote USB
    du RTL-SDR (etc.) par **WinUSB**.
-4. Dans un terminal (`Win + R`, `cmd`) :
+4. Dans un terminal (`Win + R`, `cmd`), créez l'environnement et installez les dépendances :
    ```bat
+   python -m venv .venv
+   .venv\Scripts\activate
    pip install -r requirements.txt
-   pip install SoapySDR
    ```
+   **Ne faites PAS `pip install SoapySDR`** : le paquet PyPI n'a pas de roue Windows.
+   Les bindings Python de SoapySDR viennent de PothosSDR. Deux possibilités :
+   - Si l'installeur PothosSDR a enregistré ses bindings (c'est le cas des versions
+     récentes), testez directement :
+     ```bat
+     python -c "import SoapySDR; print(SoapySDR.Device.enumerate())"
+     ```
+   - Sinon, pointez `PYTHONPATH` vers les bindings de PothosSDR (vérifiez le dossier
+     exact avec `dir "C:\Program Files\PothosSDR\lib\site-packages"` ; le nom du fichier
+     `_SoapySDR.cp3XX-*.pyd` indique la version de Python requise, ex. `cp312` →
+     installez Python 3.12) :
+     ```bat
+     set PATH=C:\Program Files\PothosSDR\bin;%PATH%
+     set PYTHONPATH=C:\Program Files\PothosSDR\lib\site-packages;%PYTHONPATH%
+     python -c "import SoapySDR; print(SoapySDR.Device.enumerate())"
+     ```
+     L'Airspy doit apparaître avec `driver=airspy` (sinon refaire le pilote WinUSB avec Zadig).
 5. Lancez :
    ```bat
    python -m pyphantom
