@@ -17,7 +17,11 @@ FT8_COSTAS = [3, 1, 4, 0, 6, 5, 2]
 FT8_SYMBOLS = 79
 FT8_SYMBOL_S = 0.16
 FT8_TONE_HZ = 6.25
-GRAY = [0, 1, 3, 2, 6, 7, 5, 4]
+# graymap de WSJT-X (genft8.f90) : valeur 3 bits -> ton ; GRAY = inverse (ton -> valeur)
+GRAY_ENC = [0, 1, 3, 2, 5, 6, 4, 7]
+GRAY = [0] * 8
+for _v, _t in enumerate(GRAY_ENC):
+    GRAY[_t] = _v
 
 FT4_SYMBOLS = 105
 FT4_SYMBOL_S = 0.048
@@ -32,6 +36,7 @@ class FT8Decoder:
         self.mode = mode
         self.center = float(center)
         self.buf = np.zeros(0, dtype=np.float32)
+        self._offset = 0
         self.messages = []
         self.samples_received = 0
         self.last_snr = -99
@@ -63,27 +68,36 @@ class FT8Decoder:
             self.history.append(lvl)
         max_len = int(self.fs * (self.period + 5))
         if len(self.buf) > max_len:
+            drop = len(self.buf) - max_len
             self.buf = self.buf[-max_len:]
+            self._offset = max(0, self._offset - drop)
 
     def try_decode(self):
+        sym_len = max(int(self.fs * self.tsym), 8)
         frame_len = int(self.fs * self.period)
-        if len(self.buf) < frame_len:
+        chunk_len = frame_len + 10 * sym_len
+        if len(self.buf) < chunk_len:
             return None
-        chunk = self.buf[-frame_len:]
-        self.buf = self.buf[:-frame_len // 2]
+        start = min(self._offset, len(self.buf) - chunk_len)
+        chunk = self.buf[start:start + chunk_len]
+        self._offset = start + int(self.fs * 0.5)
         snr = self._estimate_snr(chunk)
         self.last_snr = snr
         self.activity = snr > -20
         if snr < -22:
             return None
-        tones = self._detect_tones(chunk)
-        if tones is None or len(tones) < 40:
+        res = self._detect_tones(chunk)
+        if res is None:
+            return None
+        tones, confs = res
+        if len(tones) < 40:
             return None
         sync_pos = self._find_costas(tones)
-        if sync_pos is None:
+        if sync_pos is None or sync_pos + 72 >= len(tones):
             return None
         bits = self._tones_to_bits(tones, sync_pos)
-        msg = self._decode_bits(bits)
+        soft = self._soft_llrs(tones, confs, sync_pos)
+        msg = self._decode_bits(bits, soft)
         if msg and msg not in self.messages[-6:]:
             self.messages.append(msg)
             if len(self.messages) > 40:
@@ -93,10 +107,11 @@ class FT8Decoder:
             return msg
         return None
 
-    def _decode_bits(self, bits):
+    def _decode_bits(self, bits, soft=None):
         if len(bits) >= 174:
-            soft = np.array([1.0 if b == 0 else -1.0 for b in bits[:174]], dtype=np.float64)
-            dec = self.ldpc.decode(soft)
+            if soft is None or len(soft) < 174:
+                soft = [4.0 if b == 0 else -4.0 for b in bits[:174]]
+            dec = self.ldpc.decode(soft[:174])
             hard = [int(b) for b in dec[:91]] if dec is not None else list(bits[:174])[:91]
             if len(hard) >= 91 and check_crc14(hard[:91]):
                 m = unpack_ft8(hard[:77])
@@ -127,24 +142,28 @@ class FT8Decoder:
         if nsym < 20:
             return None
         tones = []
+        confs = []
         freqs = np.fft.rfftfreq(sym_len, 1.0 / self.fs)
         for i in range(nsym):
             seg = chunk[i * sym_len:(i + 1) * sym_len]
             if len(seg) < sym_len // 2:
                 break
             spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
-            best, best_e = 0, 0.0
+            energies = []
             for t in range(8):
                 f = self.center + t * self.tone
                 if f < 100 or f > self.fs / 2 - 100:
+                    energies.append(0.0)
                     continue
                 idx = int(np.argmin(np.abs(freqs - f)))
-                e = float(np.mean(spec[max(0, idx - 1):idx + 2]))
-                if e > best_e:
-                    best_e = e
-                    best = t
+                energies.append(float(np.mean(spec[max(0, idx - 1):idx + 2])))
+            order = sorted(range(8), key=lambda t: energies[t], reverse=True)
+            best = order[0]
+            second = energies[order[1]] if len(order) > 1 else 0.0
+            conf = (energies[best] - second) / (energies[best] + 1e-12)
             tones.append(best)
-        return tones
+            confs.append(max(0.0, min(1.0, conf)))
+        return tones, confs
 
     def _find_costas(self, tones):
         c = self.costas
@@ -157,10 +176,12 @@ class FT8Decoder:
                 best_pos = i
         return best_pos
 
+    def _data_indices(self, sync_pos):
+        return list(range(sync_pos + 7, sync_pos + 36)) + list(range(sync_pos + 43, sync_pos + 72))
+
     def _tones_to_bits(self, tones, sync_pos):
-        data_idx = list(range(sync_pos + 7, sync_pos + 36)) + list(range(sync_pos + 43, sync_pos + 72))
         bits = []
-        for i in data_idx:
+        for i in self._data_indices(sync_pos):
             if i >= len(tones):
                 break
             g = GRAY[tones[i] % 8]
@@ -168,6 +189,18 @@ class FT8Decoder:
             bits.append((g >> 1) & 1)
             bits.append(g & 1)
         return bits
+
+    def _soft_llrs(self, tones, confs, sync_pos):
+        llrs = []
+        for i in self._data_indices(sync_pos):
+            if i >= len(tones):
+                break
+            g = GRAY[tones[i] % 8]
+            c = confs[i] if i < len(confs) else 0.5
+            mag = 0.5 + 3.5 * c
+            for b in ((g >> 2) & 1, (g >> 1) & 1, g & 1):
+                llrs.append(mag if b == 0 else -mag)
+        return llrs
 
     def on_timer(self):
         self.try_decode()
