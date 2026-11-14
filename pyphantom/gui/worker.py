@@ -21,13 +21,18 @@ class SdrWorker(QThread):
         self.audio_rate = 48_000
         self.calibration_db = 0.0
         self.demod = Demodulator(self.fs, self.audio_rate)
-        self.block_s = 0.05
+        self.out_rate = self.demod.out_rate
+        self.block_s = 0.025
+        self.audio_sink = None
+        self.emit_iq = False
+        self.emit_audio = False
         self._stop = False
 
     def set_source(self, source, fs: float) -> None:
         self.source = source
         self.fs = float(fs)
         self.demod = Demodulator(self.fs, self.audio_rate, self.demod.mode, self.demod.bw)
+        self.out_rate = self.demod.out_rate
 
     def run(self) -> None:
         block = max(1024, int(self.fs * self.block_s))
@@ -46,10 +51,14 @@ class SdrWorker(QThread):
                 continue
             db = compute_spectrum_db(iq, 2048)
             self.spectrumReady.emit(db, float(self.source.center_freq), self.fs)
-            self.iqReady.emit(iq)
+            if self.emit_iq:
+                self.iqReady.emit(iq)
             audio = self.demod.process(iq)
             if len(audio):
-                self.audioReady.emit(audio)
+                if self.audio_sink is not None:
+                    self.audio_sink.push(audio)
+                if self.emit_audio:
+                    self.audioReady.emit(audio)
             self.smeterReady.emit(power_dbfs(iq) + self.calibration_db)
 
     def stop(self) -> None:
