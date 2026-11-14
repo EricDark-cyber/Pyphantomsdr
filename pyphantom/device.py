@@ -1,9 +1,31 @@
 """Sources SDR : materiel via SoapySDR (Windows : PothosSDR) ou fichier IQ .cf32."""
 from __future__ import annotations
 
+import os
+import sys
 import time
 
 import numpy as np
+
+POTHOS_ROOTS = (r"C:\Program Files\PothosSDR", r"C:\Program Files (x86)\PothosSDR")
+
+
+def _try_pothos_paths() -> None:
+    for root in POTHOS_ROOTS:
+        bin_dir = os.path.join(root, "bin")
+        if not os.path.isdir(bin_dir):
+            continue
+        try:
+            os.add_dll_directory(bin_dir)
+        except Exception:
+            os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+        lib = os.path.join(root, "lib")
+        if os.path.isdir(lib):
+            for name in os.listdir(lib):
+                if name.startswith("python3"):
+                    sp = os.path.join(lib, name, "site-packages")
+                    if os.path.isdir(sp) and sp not in sys.path:
+                        sys.path.insert(0, sp)
 
 
 def import_soapy():
@@ -11,11 +33,18 @@ def import_soapy():
         import SoapySDR
 
         return SoapySDR
+    except Exception:
+        pass
+    _try_pothos_paths()
+    try:
+        import SoapySDR
+
+        return SoapySDR
     except Exception as exc:
         raise RuntimeError(
-            "Module SoapySDR introuvable. Sous Windows, installez PothosSDR "
-            "(https://downloads.pothosware.com/) puis ajoutez C:\\Program Files\\PothosSDR\\bin "
-            "au PATH, ou pip install SoapySDR. Détails dans README.md."
+            "Module SoapySDR introuvable. Installez PothosSDR (https://downloads.pothosware.com/) "
+            "dans C:\\Program Files\\PothosSDR, ou posez PATH=...\\PothosSDR\\bin et "
+            "PYTHONPATH=...\\PothosSDR\\lib\\python3.X\\site-packages (voir README.md)."
         ) from exc
 
 
