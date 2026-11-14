@@ -43,16 +43,27 @@ def import_soapy():
         ) from exc
 
 
+def _kwargs_dict(d) -> dict:
+    try:
+        return {k: d[k] for k in d.keys()}
+    except Exception:
+        try:
+            return dict(d)
+        except Exception:
+            return {}
+
+
 def list_devices() -> list[dict]:
     SoapySDR = import_soapy()
     out = []
     for d in SoapySDR.Device.enumerate():
-        label = d.get("driver", "?")
+        args = _kwargs_dict(d)
+        label = args.get("driver", "?")
         for key in ("label", "serial", "product"):
-            if d.get(key):
-                label = f"{label}: {d[key]}"
+            if args.get(key):
+                label = f"{label}: {args[key]}"
                 break
-        out.append({"label": label, "args": d})
+        out.append({"label": label, "args": args})
     return out
 
 
