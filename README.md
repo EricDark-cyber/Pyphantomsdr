@@ -42,8 +42,11 @@ pyphantom/
 
 ## Installation sous Windows
 
-1. **Python 3.10 ou plus récent, 64 bits** (python.org) — cochez « Add python.exe to PATH ».
-   Vérifiez avec `python --version`.
+1. **Python 3.9 ou plus récent, 64 bits** (python.org) — cochez « Add python.exe to PATH ».
+   `python --version` doit afficher 3.9+ **64-bit** (3.9.12 convient ; `airspy.dll` est en 64 bits,
+   un Python 32 bits ne pourrait pas la charger). Le code du dépôt est compatible 3.9
+   (vérifié : aucun `match`, aucune union `X | Y` évaluée). pip choisira automatiquement les
+   versions compatibles (numpy ≤2.2, PySide6 6.8.x, pyqtgraph 0.13.x sur un 3.9).
 2. Dans un terminal (`Win + R`, `cmd`), à la racine du dépôt téléchargé :
    ```bat
    python -m venv .venv
