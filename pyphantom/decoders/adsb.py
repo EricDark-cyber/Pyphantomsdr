@@ -1,11 +1,5 @@
 from .crc24 import crc24, check_crc24
-try:
-    from .modes import ModeSDecoder, decode_mode_s
-    HAS_MODES = True
-except ImportError:
-    ModeSDecoder = None
-    decode_mode_s = None
-    HAS_MODES = False  # fichier modes.py non fourni
+from .modes import ModeSDecoder, decode_mode_s
 from .adsb_cpr import CPRTracker
 """Décodeur ADS-B / Mode S (1090 MHz) simple.
 
@@ -35,7 +29,7 @@ class ADSBDecoder:
         self.messages = collections.deque(maxlen=200)
         self.cpr = CPRTracker()
         self._time = 0.0
-        self.modes = ModeSDecoder() if HAS_MODES else None
+        self.modes = ModeSDecoder()
 
     def process_iq(self, iq):
         """Traite un bloc d'échantillons complexes."""

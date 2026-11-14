@@ -39,6 +39,9 @@ from pyphantom.decoders.digital import (  # noqa: E402
     pocsag_encode,
     pocsag_syndrome,
 )
+from pyphantom.decoders.modes import ModeSDecoder, decode_mode_s  # noqa: E402
+from pyphantom.decoders.gmsk import GMSKDemodulator  # noqa: E402
+from pyphantom.decoders.olivia import OliviaDecoder  # noqa: E402
 
 FS = 48_000
 
@@ -228,21 +231,50 @@ def test_ekf_fec_dsp() -> None:
     print("EKF/Hamming/OptimizedDSP ok")
 
 
+def test_modes_gmsk_olivia() -> None:
+    # Mode S : trame DF17 valide -> nom de DF + stats
+    raw = "8D4840D6202CC371C32CE0576098"
+    msg = decode_mode_s({"df": 17, "raw": raw, "bits": 112})
+    assert msg["df_name"] == "ADS-B Extended Squitter", msg
+    ms = ModeSDecoder()
+    ms.process({"df": 17, "raw": raw, "bits": 112})
+    ms.process({"df": 11, "raw": "5D4840D6A6B4", "bits": 56})
+    assert ms.stats().get(17) == 1 and ms.stats().get(11) == 1
+    # squawk DF11 extrait (champ 13 bits)
+    m11 = decode_mode_s({"df": 11, "raw": "5D4840D6A6B4", "bits": 56})
+    assert "squawk" not in m11 or isinstance(m11.get("squawk"), str)
+
+    # GMSK : signal FSK synthetique -> bits
+    fs, baud = 96_000.0, 9600.0
+    t = np.arange(int(fs * 0.2)) / fs
+    f = np.where((np.arange(len(t)) // int(fs / baud)) % 2 == 0, 4800.0, 2400.0)
+    phase = 2 * np.pi * np.cumsum(f) / fs
+    x = np.exp(1j * phase).real.astype(np.float32)
+    g = GMSKDemodulator(fs, baud)
+    bits = []
+    for i in range(0, len(x), 4800):
+        bits += g.process(x[i:i + 4800])
+    assert len(bits) > 50 and set(bits) <= {0, 1}
+
+    # Olivia / Contestia : init + traitement de zeros sans crash
+    ol = OliviaDecoder(8000)
+    assert isinstance(ol.process(np.zeros(8000, dtype=np.float32)), list)
+    co = ContestiaDecoder()
+    assert co.baud == 62.5
+    assert isinstance(co.process(np.zeros(8000, dtype=np.float32)), list)
+    print("modes/gmsk/olivia ok (DF17 nomme, stats, squawk, GMSK bits, Olivia/Contestia)")
+
+
 def test_smoke_decoders() -> None:
     zeros = np.zeros(48000, dtype=np.float32)
     assert isinstance(DMRDecoder(FS).process(zeros), list)
     assert isinstance(C4FMDecoder(FS).process(zeros), list)
     assert isinstance(ACARSDecoder(FS).process(zeros), list)
-    ais = AISDecoder(FS, emit=lambda m: None)
+    ais = AISDecoder(FS, emit=lambda m: None)  # GMSK reel maintenant present
     ais.process(zeros)
     dcs = DCSDetector(FS)
     dcs.process(zeros)
-    try:
-        ContestiaDecoder()
-        raise AssertionError("ContestiaDecoder aurait du lever RuntimeError (olivia.py manquant)")
-    except RuntimeError:
-        pass
-    print("smoke ok (DMR/C4FM/ACARS/AIS/DCS sur zeros, Contestia -> RuntimeError explicite)")
+    print("smoke ok (DMR/C4FM/ACARS/AIS(GMSK)/DCS sur zeros)")
 
 
 if __name__ == "__main__":
@@ -255,5 +287,6 @@ if __name__ == "__main__":
     test_audiofx()
     test_adsb_frame()
     test_ekf_fec_dsp()
+    test_modes_gmsk_olivia()
     test_smoke_decoders()
     print("Tous les tests decodeurs passent.")

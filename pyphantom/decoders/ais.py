@@ -1,10 +1,5 @@
 from .crc16 import crc16, check_crc16
-try:
-    from .gmsk import GMSKDemodulator
-    HAS_GMSK = True
-except ImportError:
-    GMSKDemodulator = None
-    HAS_GMSK = False  # fichier gmsk.py non fourni : repli sur demod par transitions
+from .gmsk import GMSKDemodulator
 from .ais_pos import decode_ais_position
 """Décodeur AIS (Automatic Identification System) pour le trafic maritime.
 
@@ -38,10 +33,7 @@ class AISDecoder:
         self.buf = np.zeros(0, dtype=np.float32)
         self.baud = 9600.0
         self.sps = self.fs / self.baud
-        if HAS_GMSK:
-            self.demod = GMSKDemodulator(self.fs, self.baud)
-        else:
-            self.demod = _TransitionDemod(self.fs, self.baud)
+        self.demod = GMSKDemodulator(self.fs, self.baud)
 
     def process(self, audio):
         if len(audio) == 0:

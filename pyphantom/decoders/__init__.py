@@ -1,9 +1,6 @@
 """Decodeurs numeriques et filtres audio pour PyPhantom SDR.
 
 Source : bibliotheque RadioLab de l'auteur, reorganisee en package.
-Certains modules optionnels (modes.py, gmsk.py, olivia.py) n'ont pas ete
-fournis : les decoders concernes (ADSB ModeS avance, AIS GMSK, Contestia)
-levent un RuntimeError explicite s'ils manquent.
 """
 from . import adsb_cpr, ais_pos, crc16, crc24  # noqa: F401
 from .adsb import ADSBDecoder, decode_adsb_payload  # noqa: F401
@@ -20,6 +17,9 @@ from .fec import ConvolutionalFEC, HammingFEC, ReedSolomon63  # noqa: F401
 from .fec_advanced import BerlekampMassey, TurboDecoder, ViterbiDecoder  # noqa: F401
 from .fmradio import RDSDecoder, StereoPilot, ToneDetector  # noqa: F401
 from .dsp_optimized import OptimizedDSP  # noqa: F401
+from .modes import ModeSDecoder, decode_mode_s  # noqa: F401
+from .gmsk import GMSKDemodulator  # noqa: F401
+from .olivia import OliviaDecoder  # noqa: F401
 
 __all__ = [
     "ADSBDecoder", "decode_adsb_payload", "adsb_cpr",
@@ -32,4 +32,5 @@ __all__ = [
     "ReedSolomon63", "HammingFEC", "ConvolutionalFEC",
     "ViterbiDecoder", "BerlekampMassey", "TurboDecoder",
     "OptimizedDSP", "crc16", "crc24",
+    "ModeSDecoder", "decode_mode_s", "GMSKDemodulator", "OliviaDecoder",
 ]
