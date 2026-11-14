@@ -1,27 +1,18 @@
-"""Point d'entrée : python -m pyphantom [--iq fichier.cf32] [--rate 1000000]."""
-from __future__ import annotations
+"""Point d'entree de PyPhantom SDR : lance l'interface (port complet de RadioLab 0.15).
 
-import argparse
+Lancer depuis la racine du depot :  python -m pyphantom
+Le recepteur Airspy R2 est pilote en ctypes sur airspy.dll (fourni a la racine du depot,
+avec libusb-1.0.dll et pthreadVC2.dll) : aucune installation de PothosSDR/SoapySDR n'est
+requise. Un fichier I/Q peut etre ouvert depuis le menu (ou en ligne de commande :
+python -m radiolab.cli fichier.wav --freq 7100000 --mode USB -o audio.wav).
+"""
 import sys
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="PyPhantom SDR")
-    parser.add_argument("--iq", help="Fichier IQ .cf32 à lire en boucle (test sans récepteur)")
-    parser.add_argument("--rate", type=float, default=1_000_000.0, help="Sample rate du fichier IQ (S/s)")
-    parser.add_argument("--audio-rate", type=int, default=48_000, help="Sample rate audio (Hz)")
-    args = parser.parse_args()
+    from radiolab.gui import main as radiolab_main
 
-    from PySide6.QtWidgets import QApplication
-
-    from .gui.main_window import MainWindow
-
-    app = QApplication(sys.argv)
-    win = MainWindow(iq_file=args.iq, iq_rate=args.rate)
-    if args.audio_rate != 48_000:
-        win.cfg["audio_rate"] = args.audio_rate
-    win.show()
-    return app.exec()
+    return radiolab_main()
 
 
 if __name__ == "__main__":
