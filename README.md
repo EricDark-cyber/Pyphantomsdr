@@ -21,7 +21,8 @@ pyphantom/
 │   ├── bookmarks.py       # favoris (JSON : fréquence, nom, mode)
 │   ├── config.py          # réglages persistants (%APPDATA%\PyPhantom)
 │   ├── ft8/               # décodeur FT8/FT4 intégré (LDPC + CRC-14 + unpack WSJT-X)
-│   ├── decoders/          # décodeurs numériques : ADS-B/ModeS+CPR, AIS(GMSK), Olivia/Contestia, ACARS, C4FM, DMR, POCSAG, CTCSS/DCS, RDS, FEC, EKF, AudioFX
+│   ├── spectrum.py        # fenêtres d'analyse + spectre/zoom (utilisé aussi par filters.py)
+│   ├── decoders/          # décodeurs : ADS-B/ModeS+CPR, AIS(GMSK), Olivia/Contestia, PSK31, RTTY, WSPR, packet AX.25, SSTV/fax/Hell (PNG), TETRA, POCSAG/DCS, CTCSS, RDS, SIGMET, DCF77/Allouis, FEC, EKF, AudioFX, Receiver complet
 │   └── gui/               # fenêtre principale, widget spectre/waterfall, thread d'acquisition
 ├── tests/test_dsp.py      # tests hors-ligne du DSP (signaux synthétiques)
 ├── tests/test_filters.py  # tests des filtres en flux (équivalence morcelé / d'un coup)

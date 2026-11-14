@@ -42,6 +42,24 @@ from pyphantom.decoders.digital import (  # noqa: E402
 from pyphantom.decoders.modes import ModeSDecoder, decode_mode_s  # noqa: E402
 from pyphantom.decoders.gmsk import GMSKDemodulator  # noqa: E402
 from pyphantom.decoders.olivia import OliviaDecoder  # noqa: E402
+from pyphantom.decoders import (  # noqa: E402
+    DCF77Decoder,
+    FaxDecoder,
+    PacketDecoder,
+    PSK31Decoder,
+    RTTYDecoder,
+    Receiver,
+    SSTVDecoder,
+    TETRADecoder,
+    WSPRDecoder,
+    Baseband,
+    decode_minute,
+    encode_minute,
+    parse_sigmet,
+    write_png,
+)
+from pyphantom.spectrum import get_window, power_spectrum_db, zoom_spectrum  # noqa: E402
+from pyphantom.filters import lowpass_taps  # noqa: E402
 
 FS = 48_000
 
@@ -265,6 +283,77 @@ def test_modes_gmsk_olivia() -> None:
     print("modes/gmsk/olivia ok (DF17 nomme, stats, squawk, GMSK bits, Olivia/Contestia)")
 
 
+def test_spectrum_and_windows() -> None:
+    # fenetres nommees disponibles (spectrum.py) -> utilisables par filters.lowpass_taps
+    h = lowpass_taps(3000.0, 48000.0, 101, window="Hann")
+    assert abs(float(h.sum()) - 1.0) < 1e-6
+    w = get_window("Blackman-Harris", 256)
+    assert abs(float(w.sum()) - 1.0) < 1e-6 and len(w) == 256
+    # spectre : pic a la bonne frequence
+    fs = 1_000_000.0
+    t = np.arange(8192) / fs
+    iq = (0.5 * np.exp(2j * np.pi * 100_000 * t)).astype(np.complex64)
+    db = power_spectrum_db(iq, 4096)
+    freqs = np.fft.fftshift(np.fft.fftfreq(4096, 1 / fs))
+    peak = freqs[np.argmax(db)]
+    assert abs(peak - 100_000) < fs / 4096, f"pic spectre {peak}"
+    f, part = zoom_spectrum(iq, fs, 0.0, 50_000, 150_000, npoints=256, nfft=4096)
+    assert len(f) == len(part) <= 256
+    print(f"spectrum ok (fenetres nommees, pic a {peak:.0f} Hz, zoom {len(f)} pts)")
+
+
+def test_timesignals() -> None:
+    bits = encode_minute(minute=37, hour=14, day=5, weekday=6, month=11, year=2026, summer=True)
+    t = decode_minute(bits)
+    assert t is not None and t["minute"] == 37 and t["hour"] == 14 and t["day"] == 5
+    assert t["weekday"] == 6 and t["month"] == 11 and t["year"] == 2026 and t["summer"]
+    bad = bits.copy()
+    bad[21] ^= 1  # parite minute rompue
+    assert decode_minute(bad) is None
+    dcf = DCF77Decoder(48000, 700.0, emit=lambda s: None)
+    dcf.process(np.zeros(48000, dtype=np.float32))
+    print("timesignals ok (encode/decode minute aller-retour, parite, DCF77 smoke)")
+
+
+def test_sigmet_pictures() -> None:
+    txt = "SIGMET A VALID 251200/251800 LFPO TS ISOL CB FL300="
+    p = parse_sigmet(txt)
+    assert p is not None and p["kind"] == "SIGMET" and p["fir"] == "LFPO", p
+    assert "Orages" in p["hazards"] and p["flight_level"] == "FL300", p
+    # PNG pur python
+    img = np.zeros((4, 4, 3), dtype=np.uint8)
+    img[..., 0] = 255
+    path = "/tmp/test_pyphantom.png"
+    write_png(path, img)
+    with open(path, "rb") as f:
+        assert f.read(8) == b"\x89PNG\r\n\x1a\n"
+    fx = FaxDecoder(48000, emit=lambda m: None)
+    fx.process(np.zeros(48000, dtype=np.float32))
+    print("sigmet/pictures ok (parse SIGMET, write_png signature PNG, FaxDecoder smoke)")
+
+
+def test_simple_decoders_and_receiver() -> None:
+    zeros8 = np.zeros(8000, dtype=np.float32)
+    zeros48 = np.zeros(48000, dtype=np.float32)
+    assert isinstance(PSK31Decoder(8000).process(zeros8), list)
+    assert isinstance(RTTYDecoder(8000).process(zeros8), list)
+    assert isinstance(WSPRDecoder(12000).process(zeros8), list)
+    assert isinstance(PacketDecoder(48000).process(zeros48), list)
+    assert isinstance(SSTVDecoder(8000).process(zeros8), list)
+    assert isinstance(TETRADecoder(48000).process(zeros48), list)
+    bb = Baseband(48000, 700.0, 40.0, 60.0)
+    z = bb.process(np.zeros(48000, dtype=np.complex64))
+    assert len(z) > 0 and abs(bb.fs_out - 48000 / bb.M) < 1e-9
+    # chaine Receiver complete (I/Q -> audio 48 kHz), repli _NoOpBlock pour noise/kalman/neural
+    r = Receiver(1_000_000)
+    r.set_mode("USB")
+    rng = np.random.default_rng(0)
+    iq = (0.1 * (rng.standard_normal(100_000) + 1j * rng.standard_normal(100_000))).astype(np.complex64)
+    audio = r.process(iq)
+    assert len(audio) > 0
+    print(f"decoders simples + Baseband + Receiver ok (audio {len(audio)} ech.)")
+
+
 def test_smoke_decoders() -> None:
     zeros = np.zeros(48000, dtype=np.float32)
     assert isinstance(DMRDecoder(FS).process(zeros), list)
@@ -288,5 +377,9 @@ if __name__ == "__main__":
     test_adsb_frame()
     test_ekf_fec_dsp()
     test_modes_gmsk_olivia()
+    test_spectrum_and_windows()
+    test_timesignals()
+    test_sigmet_pictures()
+    test_simple_decoders_and_receiver()
     test_smoke_decoders()
     print("Tous les tests decodeurs passent.")
