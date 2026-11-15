@@ -257,6 +257,9 @@ class FT8Decoder:
         self._outbox = collections.deque(maxlen=200)
         self._last_emit_at = {}
         self._known = []                                               # signaux déjà décodés : (début absolu en s, Hz, tonalités, texte)
+        self._slot = None                                              # numéro de la période en cours d'affichage
+        self._slot_origin = None                                       # début (en s) d'une période, d'après le premier signal
+        self.separators = True                                         # une ligne de séparation entre deux périodes
         self.messages = []
         self.decodes = collections.deque(maxlen=200)                   # (texte, dB, Hz, instant de début en s)
         self.last_snr = -99
@@ -367,6 +370,15 @@ class FT8Decoder:
                 continue                                               # déjà vu dans cette période
             self._last_emit_at[text] = start
             self.last_snr = snr
+            if self._slot_origin is None:                              # les émissions débutent toutes au même moment de la période
+                self._slot_origin = start - 0.5 * self.slot_s
+            slot = int((start - self._slot_origin) // self.slot_s)
+            if self.separators and self._slot is not None and slot > self._slot:
+                sep = "──────── période suivante ────────"
+                self._outbox.append(sep)
+                if self.emit:
+                    self.emit(sep + "\n")
+            self._slot = slot if self._slot is None else max(self._slot, slot)
             line = "%s  %+03ddB  %4.0fHz" % (text, snr, freq)
             self.decodes.append((text, snr, freq, start))
             self.messages.append(line)

@@ -47,6 +47,20 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 MY_LOCATOR = "JN33ad"
+
+
+def find_locator(line):
+    """Premier carré locator (4 ou 6 caractères) d'un message FT8/FT4, ou None.
+    « RR73 » a la forme d'un locator mais veut dire « bien reçu, 73 » : on l'écarte."""
+    for word in line.split():
+        w = word.upper().strip(".,;")
+        if w == "RR73" or len(w) not in (4, 6):
+            continue
+        if w[0] in "ABCDEFGHIJKLMNOPQR" and w[1] in "ABCDEFGHIJKLMNOPQR" and w[2].isdigit() and w[3].isdigit():
+            if len(w) == 4 or (w[4].isalpha() and w[5].isalpha()):
+                return w
+    return None
+
 from .dsp.sigmet import SigmetCollector, format_sigmet
 from .dsp.adsb import ADSBDecoder, decode_adsb_payload
 from .dsp.modes import decode_mode_s
@@ -998,9 +1012,11 @@ class MainWindow(QtWidgets.QMainWindow):
                            ("PSK31", "PSK31"), ("PSK63", "PSK63"), ("CW (morse)", "CW"),
                            ("Packet HF 300 bauds (AX.25)", "PACKET300"),
                            ("APRS / packet VHF 1200 bauds (en NFM)", "APRS1200"),
+                           ("AIS : navires (en NFM, 161,975 ou 162,025 MHz)", "AIS"),
+                           ("ACARS : avions (en AM, 131,725 MHz)", "ACARS"),
                            ("NAVTEX (518 et 490 kHz)", "NAVTEX"), ("Fax météo HF", "FAX"),
                            ("SSTV (images des radioamateurs)", "SSTV"),
-                           ("Hellschreiber (texte en image)", "HELL"), ("WSPR (balises, autour de 1500 Hz)", "WSPR"), ("FT8 (signaux faibles)", "FT8"), ("FT4 (signaux faibles)", "FT4"), ("JS8Call (expérimental)", "JS8"), ("Olivia (HF robuste)", "OLIVIA"), ("Contestia (concours)", "CONTESTIA"), ("JT65 (DX faible)", "JT65"), ("DMR (numérique)", "DMR"), ("D-STAR (numérique)", "DSTAR"), ("C4FM (Yaesu)", "C4FM"), ("M17 (libre)", "M17"), ("Golay (24,12)", "GOLAY"),
+                           ("Hellschreiber (texte en image)", "HELL"), ("WSPR (balises, autour de 1500 Hz)", "WSPR"), ("FT8 (signaux faibles)", "FT8"), ("FT4 (signaux faibles)", "FT4"), ("JS8Call (ébauche : ne décode pas encore)", "JS8"), ("Olivia (ébauche, non vérifiée)", "OLIVIA"), ("Contestia (ébauche, non vérifiée)", "CONTESTIA"), ("JT65 (ébauche, non vérifiée)", "JT65"), ("DMR (numérique)", "DMR"), ("D-STAR (numérique)", "DSTAR"), ("C4FM (Yaesu)", "C4FM"), ("M17 (libre)", "M17"), ("Golay (24,12)", "GOLAY"),
                            ("Heure : DCF77 (77,5 kHz)", "DCF77"), ("Heure : Allouis (162 kHz)", "ALS162")):
             self.digi_kind.addItem(label, key)
         self.digi_kind.currentIndexChanged.connect(self.on_decoders)
@@ -2341,9 +2357,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.update_analysis()
             self.update_filter_response()
         # ADS-B
-        if self.adsb is not None and self.radio.last_block is not None:
+        if self.adsb is not None:
             try:
-                self.adsb.process_iq(self.radio.last_block)
+                for msg in self.adsb.take():
+                    self._show_adsb(msg)
             except Exception:
                 pass
         # ACARS / AIS (sur audio démodulé, mode NFM)
@@ -2447,32 +2464,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.sigmet_list.scrollToBottom()
         if new:
             kind = self.digi_kind.currentData() or ""
+            if kind in ("AIS", "ACARS") and hasattr(self, "ais_list"):
+                self._show_ais_acars(kind, new)
             if kind in ("FT8", "FT4") and hasattr(self, "ft8_list"):
                 for ln in new.splitlines():
                     ln = ln.strip()
                     if not ln:
                         continue
+                    if ln.startswith("──"):                 # séparateur entre deux périodes d'émission
+                        item = QtWidgets.QListWidgetItem(ln)
+                        item.setForeground(QtGui.QColor("#718096"))
+                        self.ft8_list.addItem(item)
+                        continue
                     # Chercher un locator dans le message et calculer la distance
                     dist_str = ""
-                    for word in ln.split():
-                        w = word.upper().strip(".,;")
-                        if len(w) >= 4 and w[0].isalpha() and w[1].isalpha() and w[2].isdigit():
-                            coords = maidenhead_to_latlon(w)
-                            my = maidenhead_to_latlon(MY_LOCATOR)
-                            if coords and my:
-                                km = haversine_km(my[0], my[1], coords[0], coords[1])
-                                dist_str = f"  [{w} {km:.0f} km]"
-                                break
+                    loc = find_locator(ln)
+                    if loc:
+                        coords = maidenhead_to_latlon(loc)
+                        my = maidenhead_to_latlon(MY_LOCATOR)
+                        if coords and my:
+                            km = haversine_km(my[0], my[1], coords[0], coords[1])
+                            dist_str = f"  [{loc} {km:.0f} km]"
                     display = f"{time.strftime('%H:%M:%S')}  {kind}  {ln}{dist_str}"
                     item = QtWidgets.QListWidgetItem(display)
                     item.setForeground(QtGui.QColor("#e2e8f0"))
                     # Stocker le locator pour le lien
-                    for word in ln.split():
-                        w = word.upper().strip(".,;")
-                        if len(w) >= 4 and w[0].isalpha() and w[1].isalpha() and w[2].isdigit():
-                            item.setData(QtCore.Qt.ItemDataRole.UserRole, w)
-                            item.setToolTip(f"Cliquer pour voir {w} sur la carte")
-                            break
+                    if loc:
+                        item.setData(QtCore.Qt.ItemDataRole.UserRole, loc)
+                        item.setToolTip(f"Cliquer pour voir {loc} sur la carte")
                     if self.ft8_list.count() == 0 or self.ft8_list.item(self.ft8_list.count()-1).text() != item.text():
                         self.ft8_list.addItem(item)
                         # Journal FT8/FT4
@@ -2562,36 +2581,36 @@ class MainWindow(QtWidgets.QMainWindow):
             self.audio_curve.setData(spec[0][keep], spec[1][keep])
 
     def on_acars(self, on):
-        if on and self.ready():
-            fs = self.radio.sample_rate
-            def emit(msg):
-                reg = msg.get("registration") or "?"
-                txt = msg.get("text", "")[:80]
-                self.acars_list.addItem(f"{reg}  {txt}")
-                self.acars_list.scrollToBottom()
-            self.acars = ACARSDecoder(fs, emit)
-        else:
-            self.acars = None
+        """Raccourci : choisit le décodeur ACARS du menu (le récepteur doit être en AM)."""
+        self._select_digi("ACARS", on)
 
     def on_ais(self, on):
-        if on and self.ready():
-            fs = self.radio.sample_rate
-            def emit(msg):
-                mmsi = msg.get("mmsi") or "?"
-                lat = msg.get("lat")
-                lon = msg.get("lon")
-                pos = f"{lat:.4f}, {lon:.4f}" if lat and lon else ""
-                self.ais_list.addItem(f"MMSI {mmsi}  {pos}")
-                self.ais_list.scrollToBottom()
-                # Afficher sur la carte si disponible
-                if self.adsb_map and lat and lon:
-                    import json
-                    ac = {"icao": str(mmsi), "callsign": f"MMSI {mmsi}", "lat": lat, "lon": lon, "altitude": 0}
-                    js = "updateAircraft([" + json.dumps(ac) + "]);"
-                    self.adsb_map.page().runJavaScript(js)
-            self.ais = AISDecoder(fs, emit)
-        else:
-            self.ais = None
+        """Raccourci : choisit le décodeur AIS du menu (le récepteur doit être en NFM)."""
+        self._select_digi("AIS", on)
+
+    def _select_digi(self, kind, on):
+        if not on and self.digi_kind.currentData() != kind:
+            return
+        i = self.digi_kind.findData(kind if on else None)
+        if i >= 0:
+            self.digi_kind.setCurrentIndex(i)
+
+    def _show_ais_acars(self, kind, new):
+        """Recopie les lignes décodées dans la liste AIS ou ACARS, et place les navires sur la carte."""
+        target = self.ais_list if kind == "AIS" else self.acars_list
+        for ln in new.splitlines():
+            if ln.strip():
+                target.addItem(ln.strip())
+        while target.count() > 300:
+            target.takeItem(0)
+        target.scrollToBottom()
+        d = self.radio.rx.digi if self.ready() else None
+        if kind == "AIS" and self.adsb_map and d is not None:
+            import json
+            ships = [{"icao": str(v["mmsi"]), "callsign": v.get("name") or "MMSI %s" % v["mmsi"], "lat": v["lat"], "lon": v["lon"], "altitude": 0}
+                     for v in list(getattr(d, "vessels", {}).values()) if "lat" in v]
+            if ships:
+                self.adsb_map.page().runJavaScript("updateAircraft(" + json.dumps(ships) + ");")
 
     def on_rrc_changed(self, *_):
         if self.ready() and self.radio.rx.mode == "TETRA":
@@ -2695,33 +2714,37 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tetra_bits_label.setText(f"{mode} — Bits : {len(bits)}")
 
     def on_adsb(self, on):
-        if on and self.ready():
-            fs = self.radio.sample_rate
-            def emit(msg):
-                self.adsb._time += 0.1
-                msg = decode_mode_s(msg)
-                msg = decode_adsb_payload(msg, self.adsb.cpr, self.adsb._time)
-                icao = msg.get("icao") or "?"
-                dfname = msg.get("df_name", "")
-                cs = msg.get("callsign") or ""
-                alt = msg.get("altitude")
-                squawk = msg.get("squawk") or ""
-                lat = msg.get("lat")
-                lon = msg.get("lon")
-                pos = f"{lat:.3f},{lon:.3f}" if lat and lon else ""
-                extra = " ".join(filter(None, [cs, f"{alt}ft" if alt else "", squawk, pos]))
-                line = f"{icao}  [{dfname}]  {extra}".strip()
-                self.adsb_list.addItem(line)
-                self.adsb_list.scrollToBottom()
-                # Update map if available
-                if self.adsb_map and lat and lon:
-                    ac = {"icao": icao, "callsign": cs, "lat": lat, "lon": lon, "altitude": alt}
-                    import json
-                    js = "updateAircraft([" + json.dumps(ac) + "]);"
-                    self.adsb_map.page().runJavaScript(js)
-            self.adsb = ADSBDecoder(fs, emit)
-        else:
+        """ADS-B : le décodeur reçoit tous les blocs I/Q dans un fil à part ; on_timer affiche ses messages."""
+        if self.adsb is not None:
+            self.radio.iq_tap = None
+            self.adsb.stop()
             self.adsb = None
+        if on and self.ready():
+            self.adsb = ADSBDecoder(self.radio.sample_rate)
+            self.adsb.start()
+            self.radio.iq_tap = self.adsb.feed
+
+    def _show_adsb(self, msg):
+        icao = msg.get("icao") or "?"
+        ac = self.adsb.aircraft.get(icao, {}) if self.adsb is not None else {}
+        cs = msg.get("callsign") or ac.get("callsign") or ""
+        alt = msg.get("altitude")
+        lat, lon = msg.get("lat"), msg.get("lon")
+        extra = " ".join(filter(None, [
+            cs, "%d ft" % alt if alt is not None else "",
+            "%.0f nd cap %.0f°" % (msg["speed"], msg["heading"]) if "speed" in msg else "",
+            ("code %s" % msg["squawk"]) if msg.get("squawk") else "",
+            "%.3f,%.3f" % (lat, lon) if lat is not None and lon is not None else ""]))
+        if not extra:
+            return                                            # rien de lisible dans ce message
+        self.adsb_list.addItem(f"{icao}  [{msg.get('df_name', '')}]  {extra}".strip())
+        while self.adsb_list.count() > 300:
+            self.adsb_list.takeItem(0)
+        self.adsb_list.scrollToBottom()
+        if self.adsb_map and lat is not None and lon is not None:
+            import json
+            js = "updateAircraft([" + json.dumps({"icao": icao, "callsign": cs, "lat": lat, "lon": lon, "altitude": alt}) + "]);"
+            self.adsb_map.page().runJavaScript(js)
 
     def on_metar_clear(self):
         self.metar.clear()

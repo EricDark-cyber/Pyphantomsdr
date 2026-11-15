@@ -50,6 +50,10 @@ def cpr_decode(even_lat, even_lon, odd_lat, odd_lon, even_time, odd_time, airbor
     if lat_odd >= 270:
         lat_odd -= 360
 
+    # les deux trames doivent tomber dans la même bande de latitude, sinon la paire est incohérente
+    if cpr_nl(lat_even) != cpr_nl(lat_odd):
+        return None
+
     # Choisir la plus récente
     if even_time >= odd_time:
         lat = lat_even
