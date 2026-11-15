@@ -12,7 +12,7 @@ import threading
 import numpy as np
 from .dsp.receiver import Receiver, MODES
 from .dsp.filters import PolyDDC
-from .dsp.spectrum import (power_spectrum_db, zoom_spectrum, auto_nfft, zoom_fft, zoom_plan, zoom_raw_samples,
+from .dsp.spectrum import (power_spectrum_db, zoom_spectrum, auto_nfft, zoom_fft, zoom_plan, zoom_raw_samples, ZOOM_T_SHARP,
                            DEFAULT_WINDOW)
 from .audio import Cf32Writer, NullAudio, WavWriter, recording_name, as_stereo
 
@@ -368,7 +368,7 @@ class Radio:
         data = blocks[0] if len(blocks) == 1 else np.concatenate(blocks[::-1])
         return data[-n:]
 
-    def spectrum_view(self, f_lo, f_hi, npoints=1536, nfft=None, window=DEFAULT_WINDOW):
+    def spectrum_view(self, f_lo, f_hi, npoints=1536, nfft=None, window=DEFAULT_WINDOW, sharp=False):
         """Spectre de la bande affichée [f_lo, f_hi]. nfft=None : finesse adaptée au zoom.
 
         Retourne (fréquences, niveaux en dB, taille de FFT utilisée), ou None.
@@ -379,9 +379,9 @@ class Radio:
         available = min(self.ring_len, self.RING_SAMPLES)
         self.zoom_div = 0
         if nfft is None:                                      # finesse automatique : la loupe dès que la bande regardée est étroite
-            n_raw = zoom_raw_samples(fs, f_hi - f_lo, npoints, available)
+            n_raw = zoom_raw_samples(fs, f_hi - f_lo, npoints, available, ZOOM_T_SHARP if sharp else None)
             if n_raw:
-                view = zoom_fft(self.recent_iq(n_raw), fs, self.center_hz, f_lo, f_hi, npoints, window)
+                view = zoom_fft(self.recent_iq(n_raw), fs, self.center_hz, f_lo, f_hi, npoints, window, sharp)
                 if view is not None:
                     plan = zoom_plan(fs, f_hi - f_lo)
                     self.zoom_div = plan[0] * plan[1]

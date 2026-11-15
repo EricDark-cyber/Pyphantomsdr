@@ -793,12 +793,19 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow(self.peak_hold); form.addRow("Moyennage", self.avg_n); form.addRow("Étalonnage S-mètre", self.s_cal)
         form.addRow("Finesse (FFT)", self.fft_size); form.addRow("Fenêtre", self.fft_window); form.addRow(self.fft_info)
         self.wf_auto = QtWidgets.QCheckBox("Cascade : niveaux automatiques"); self.wf_auto.setChecked(bool(cfg.get("wf_auto", True)))
+        self.wf_sharp = QtWidgets.QCheckBox("Cascade nette au zoom (temps et fréquence)")
+        self.wf_sharp.setChecked(bool(cfg.get("wf_sharp", True)))
+        self.wf_sharp.setToolTip("Au zoom serré, combine une analyse longue (raies fines) et des analyses courtes\n"
+                                 "(suivi du temps) : morse, FT8 et voix restent nets.  Décochée : raies les plus\n"
+                                 "fines possibles, mais tout ce qui change vite est étalé.")
+        self.wf_sharp.toggled.connect(lambda on: self.cfg.__setitem__("wf_sharp", bool(on)))
         self.wf_min = QtWidgets.QSpinBox(); self.wf_max = QtWidgets.QSpinBox()
         for w, value in ((self.wf_min, cfg.get("wf_min", -110)), (self.wf_max, cfg.get("wf_max", -50))):
             w.setRange(-180, 20); w.setSuffix(" dB"); w.setSingleStep(2); w.setValue(int(value))
             w.valueChanged.connect(self.on_display)
         self.wf_auto.toggled.connect(self.on_wf_auto)
         self.wf_min.setEnabled(not self.wf_auto.isChecked()); self.wf_max.setEnabled(not self.wf_auto.isChecked())
+        form.addRow(self.wf_sharp)
         form.addRow(self.wf_auto); form.addRow("Cascade min (bleu)", self.wf_min); form.addRow("Cascade max (rouge)", self.wf_max)
         self._floor_db = -100.0
         self.on_display()
@@ -2379,7 +2386,8 @@ class MainWindow(QtWidgets.QMainWindow):
         x0, x1 = max(x0, r.center_hz - fs / 2), min(x1, r.center_hz + fs / 2)
         if x1 - x0 < 10:
             return
-        spec = r.spectrum_view(x0, x1, WF_COLS, self.fft_size.currentData(), self.fft_window.currentData())
+        spec = r.spectrum_view(x0, x1, WF_COLS, self.fft_size.currentData(), self.fft_window.currentData(),
+                               sharp=self.wf_sharp.isChecked())
         if spec is None:
             return
         freqs, db, nfft = spec

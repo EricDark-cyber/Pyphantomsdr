@@ -109,6 +109,9 @@ def zoom_spectrum(iq, fs, center_hz, f_lo, f_hi, npoints=1536, nfft=4096, window
 ZOOM_MARGIN = 2.5              # débit réduit = 2,5 fois la bande regardée (place pour la pente du filtre)
 ZOOM_T_MAX = 2.0               # durée de signal analysée au plus, en secondes (finesse de 0,5 Hz)
 ZOOM_CELLS = 2.0               # durée visée : deux « grains » de finesse par pixel de l'écran
+ZOOM_T_SHARP = 0.6             # cascade nette : durée de l'analyse longue, au plus (retard d'affichage = la moitié)
+SHARP_MIN_S = 0.08             # en dessous de cette durée, une seule analyse suffit (elle tient entre deux lignes)
+SHARP_RATIOS = (4, 16)         # analyses courtes : 4 et 16 fois plus brèves que la longue
 _gain_cache = {}
 _KAISER_BETA = 8.6             # fenêtre du filtre de réduction : environ 85 dB d'atténuation hors bande
 _plan_cache = {}
@@ -181,19 +184,25 @@ def _zoom_gain_compute(f_rel, fs, d1, d2):
     return g * (resp.real ** 2 + resp.imag ** 2)
 
 
-def zoom_raw_samples(fs, span_hz, npoints, available):
+def zoom_raw_samples(fs, span_hz, npoints, available, t_max=None):
     """Nombre d'échantillons à fournir à zoom_fft : assez pour deux grains de finesse par pixel
     (durée = 2 x npoints / bande), sans dépasser ZOOM_T_MAX ni ce qui est en mémoire."""
     plan = zoom_plan(fs, span_hz)
     if plan is None:
         return 0
     d = plan[0] * plan[1]
-    want = min(ZOOM_CELLS * npoints / max(span_hz, 1e-3), ZOOM_T_MAX) * fs + 16 * d
+    want = min(ZOOM_CELLS * npoints / max(span_hz, 1e-3), t_max or ZOOM_T_MAX) * fs + 16 * d
     return int(min(max(want, 1 << 18), available))
 
 
-def zoom_fft(iq, fs, center_hz, f_lo, f_hi, npoints=1536, window=DEFAULT_WINDOW):
+def zoom_fft(iq, fs, center_hz, f_lo, f_hi, npoints=1536, window=DEFAULT_WINDOW, sharp=False):
     """Spectre fin de la seule bande [f_lo, f_hi] par la méthode de la loupe.
+
+    sharp=True (pour la cascade) : net en fréquence ET dans le temps.  Une analyse longue donne
+    des raies fines mais étale tout ce qui change vite ; une analyse courte suit bien le temps
+    mais élargit les raies.  On fait les deux (et une intermédiaire), centrées sur le même
+    instant, et on garde en chaque point la plus petite des valeurs : il ne reste de l'énergie
+    que là où toutes sont d'accord, c'est-à-dire à la bonne fréquence et au bon moment.
 
     Retourne (fréquences, niveaux en dB, nombre d'échantillons d'origine par analyse) ; la finesse
     réelle vaut fs divisé par ce nombre.  Retourne None si la bande est trop large (voir zoom_plan)
@@ -211,19 +220,31 @@ def zoom_fft(iq, fs, center_hz, f_lo, f_hi, npoints=1536, window=DEFAULT_WINDOW)
     else:
         y = _shift_decimate(iq, d2, h2, w)
     fs_d = fs / (d1 * d2)
-    n = int(min(len(y), max(min(ZOOM_CELLS * npoints / span, ZOOM_T_MAX) * fs_d, 64)))
+    t_max = ZOOM_T_SHARP if sharp else ZOOM_T_MAX
+    n = int(min(len(y), max(min(ZOOM_CELLS * npoints / span, t_max) * fs_d, 64)))
     if n < 64:
         return None
     nfft = 1 << int(np.ceil(np.log2(2 * n)))                  # complétée par des zéros : courbe lisse entre les points
     win = get_window(window, n)
     hop = max(n // 2, 1)
     count = min((len(y) - n) // hop + 1, 8)                   # moyenne de plusieurs analyses qui se chevauchent
-    p = np.zeros(nfft)
-    for i in range(count):
-        seg = y[len(y) - n - i * hop:len(y) - i * hop]
-        spec = np.fft.fft(seg * win, nfft)
-        p += spec.real ** 2 + spec.imag ** 2
-    p = np.fft.fftshift(p / count)
+    if sharp and n >= SHARP_MIN_S * fs_d:
+        spec = np.fft.fft(y[len(y) - n:] * win, nfft)
+        p = spec.real ** 2 + spec.imag ** 2
+        mid_at = len(y) - n // 2                              # toutes les analyses sont centrées sur cet instant
+        for ratio in SHARP_RATIOS:
+            m = max(n // ratio, 32)
+            a = mid_at - m // 2
+            spec = np.fft.fft(y[a:a + m] * get_window(window, m), nfft)
+            np.minimum(p, spec.real ** 2 + spec.imag ** 2, out=p)
+        p = np.fft.fftshift(p)
+    else:
+        p = np.zeros(nfft)
+        for i in range(count):
+            seg = y[len(y) - n - i * hop:len(y) - i * hop]
+            spec = np.fft.fft(seg * win, nfft)
+            p += spec.real ** 2 + spec.imag ** 2
+        p = np.fft.fftshift(p / count)
     f_rel = (np.arange(nfft) - nfft // 2) * (fs_d / nfft)
     keep = np.flatnonzero((f_rel >= -span / 2) & (f_rel <= span / 2))
     f_rel, p = f_rel[keep], p[keep]
