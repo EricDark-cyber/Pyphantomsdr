@@ -72,10 +72,11 @@ def test_radio_ring_and_view():
     for i in range(0, len(iq), 65536):
         radio.blocks.put(iq[i:i + 65536])
     import time; time.sleep(1.0); radio.running = False; t.join()
-    assert radio.error is None and (1 << 20) <= radio.ring_len < (1 << 20) + 65536
+    ring = radio.RING_SAMPLES                                    # la mémoire garde les derniers échantillons, pas plus
+    assert radio.error is None and min(len(iq), ring) <= radio.ring_len < ring + 65536
     assert np.array_equal(radio.recent_iq(100_000), iq[-100_000:])
     f, db, nfft = radio.spectrum_view(14_099_000, 14_101_000)
-    assert nfft == 1 << 20 and abs(f[np.argmax(db)] - 14_100_075) < 100
+    assert radio.zoom_div >= 32 and FS / nfft < 1.5 and abs(f[np.argmax(db)] - 14_100_075) < 100   # loupe : finesse sous 1,5 Hz
     strong = db > db.max() - 20
     assert int(np.sum(np.diff(strong.astype(int)) == 1) + strong[0]) == 2
     f, db, nfft = radio.spectrum_view(14_000_000 - FS / 2, 14_000_000 + FS / 2, nfft=8192, window="Hamming")
@@ -122,3 +123,74 @@ def test_input_decimation(tmp_path):
     radio.running = False
     radio.set_decimation(2); assert radio.sample_rate == 500_000 and radio.vfo_hz == 7_120_000
     radio.set_decimation(1); assert radio.decimator is None and radio.sample_rate == fs
+
+
+# --------------------------------------------------------------------------------------------- loupe (zoom FFT)
+from radiolab.dsp.spectrum import zoom_fft, zoom_plan, zoom_raw_samples   # noqa: E402
+
+
+def _tone(n, f, a, fs=FS):
+    return (a * np.exp(2j * np.pi * f * np.arange(n) / fs)).astype(np.complex64)
+
+
+def test_zoom_plan():
+    assert zoom_plan(FS, FS) is None and zoom_plan(FS, 400_000) is None          # bande large : FFT classique
+    assert zoom_plan(FS, 100_000) == (1, 10)
+    d1, d2 = zoom_plan(FS, 3_000)
+    assert d2 == 16 and FS / (d1 * d2) >= 2.5 * 3_000                            # débit réduit suffisant pour la bande
+
+
+@pytest.mark.parametrize("fs,span,expected_hz", [(2.5e6, 3_000.0, 1.0), (2.5e6, 500.0, 0.65), (10e6, 3_000.0, 2.5)])
+def test_zoom_is_finer_and_levels_are_right(fs, span, expected_hz):
+    """Deux porteuses très proches sont séparées, et les niveaux sont justes jusqu'aux bords de la bande regardée."""
+    n = 1 << 22
+    f0 = 314_159.0
+    sep = 6 * expected_hz
+    rng = np.random.default_rng(0)
+    iq = (_tone(n, f0, 0.1, fs) + _tone(n, f0 + sep, 0.1, fs) + _tone(n, f0 - 0.45 * span, 0.01, fs) + _tone(n, f0 + 0.48 * span, 0.01, fs)
+          + (1e-4 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))).astype(np.complex64))
+    raw = zoom_raw_samples(fs, span, 1536, n)
+    f, db, used = zoom_fft(iq[-raw:], fs, 0.0, f0 - span / 2, f0 + span / 2, 1536)
+    res = fs / used
+    assert res <= expected_hz and res < fs / (1 << 20) / 2                       # au moins deux fois plus fin que la FFT d'un million de points
+    assert len(f) <= 1536 and f[0] >= f0 - span / 2 - res and f[-1] <= f0 + span / 2 + res
+    peak = lambda fq: db[np.abs(f - fq) <= 2 * res].max()                        # noqa: E731
+    assert abs(peak(f0) + 20) < 0.3 and abs(peak(f0 + sep) + 20) < 0.3
+    assert abs(peak(f0 - 0.45 * span) + 40) < 0.3 and abs(peak(f0 + 0.48 * span) + 40) < 0.3
+    assert db[(f > f0 + 0.35 * sep) & (f < f0 + 0.65 * sep)].min() < -30         # un vrai creux entre les deux porteuses
+
+
+def test_zoom_rejects_signals_outside_the_view():
+    """Un signal fort placé là où il se replierait dans la bande regardée ne doit pas y apparaître."""
+    n = 1 << 21
+    f0, span = 200_000.0, 5_000.0
+    d1, d2 = zoom_plan(FS, span)
+    fs_d = FS / (d1 * d2)
+    rng = np.random.default_rng(1)
+    noise = (1e-5 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))).astype(np.complex64)
+    for alias in (fs_d, -fs_d + 0.3 * span, 5 * fs_d - 0.4 * span, FS / d1 + 0.2 * span):
+        iq = noise + _tone(n, f0 + alias, 0.5)                                   # -6 dB, hors de la vue
+        f, db, _ = zoom_fft(iq[-zoom_raw_samples(FS, span, 1536, n):], FS, 0.0, f0 - span / 2, f0 + span / 2)
+        assert db.max() < -86, (alias, db.max())                                 # plus de 80 dB sous le brouilleur
+
+
+def test_radio_view_uses_the_zoom():
+    r = Radio()
+
+    class Src:
+        sample_rate = FS
+        center_hz = 7_100_000.0
+    r.source = Src()
+    r.center_hz = 7_100_000.0
+    n = 1 << 21
+    iq = _tone(n, 12_345.0, 0.1) + _tone(n, 12_355.0, 0.1)                       # 10 Hz d'écart
+    for i in range(0, n, 65536):
+        r.ring.append(iq[i:i + 65536]); r.ring_len += 65536
+    f, db, used = r.spectrum_view(7_100_000 + 12_345 - 1_000, 7_100_000 + 12_345 + 1_000, 1536)
+    assert r.zoom_div >= 32 and FS / used < 1.3
+    k1, k2 = np.argmin(np.abs(f - 7_112_345.0)), np.argmin(np.abs(f - 7_112_355.0))
+    assert abs(db[k1 - 2:k1 + 3].max() + 20) < 0.3 and abs(db[k2 - 2:k2 + 3].max() + 20) < 0.3 and db[k1:k2].min() < -40
+    f, db, nfft = r.spectrum_view(7_100_000 - FS / 2, 7_100_000 + FS / 2, 1536)  # toute la bande : FFT classique
+    assert r.zoom_div == 0 and nfft == 4096
+    f, db, nfft = r.spectrum_view(7_112_345 - 1_000, 7_112_345 + 1_000, 1536, nfft=65536)   # taille imposée : respectée
+    assert r.zoom_div == 0 and nfft == 65536
