@@ -194,3 +194,26 @@ def test_radio_view_uses_the_zoom():
     assert r.zoom_div == 0 and nfft == 4096
     f, db, nfft = r.spectrum_view(7_112_345 - 1_000, 7_112_345 + 1_000, 1536, nfft=65536)   # taille imposée : respectée
     assert r.zoom_div == 0 and nfft == 65536
+
+
+def test_sharp_waterfall_follows_time_and_keeps_thin_lines():
+    """Cascade nette : une porteuse qui vient de s'arrêter disparaît tout de suite, alors que
+    l'analyse longue seule la montre encore ; une porteuse stable garde son niveau et sa finesse."""
+    from radiolab.dsp.spectrum import ZOOM_T_SHARP
+    fs, span, f0 = 250e3, 2_000.0, 40_000.0
+    n = int(fs * 3)
+    t = np.arange(n) / fs
+    stops = n / fs - ZOOM_T_SHARP / 2 - 0.12                  # s'arrête 0,12 s avant l'instant analysé
+    rng = np.random.default_rng(2)
+    iq = (0.1 * np.exp(2j * np.pi * (f0 - 400) * t) + 0.1 * (t < stops) * np.exp(2j * np.pi * (f0 + 300) * t)
+          + 1e-4 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))).astype(np.complex64)
+    raw = zoom_raw_samples(fs, span, 1536, n, ZOOM_T_SHARP)
+    args = (iq[-raw:], fs, 0.0, f0 - span / 2, f0 + span / 2, 1536)
+    f, plain, used = zoom_fft(*args, window="Blackman-Harris", sharp=False)
+    f2, sharp, used2 = zoom_fft(*args, window="Blackman-Harris", sharp=True)
+    assert abs(fs / used2 - 1 / ZOOM_T_SHARP) < 0.1           # analyse longue de 0,6 s
+    near = lambda db, fq, w=3.0: db[np.abs(f2 - fq) <= w].max()     # noqa: E731
+    assert abs(near(sharp, f0 - 400) + 20) < 0.5              # porteuse stable : niveau juste
+    assert (sharp[np.abs(f2 - (f0 - 400)) < 60] > -40).sum() <= 8      # et raie fine : moins de 11 Hz de large à 20 dB sous le sommet
+    gone_plain, gone_sharp = plain[np.abs(f - (f0 + 300)) <= 3].max(), near(sharp, f0 + 300)
+    assert gone_plain > -40 and gone_sharp < gone_plain - 25  # la porteuse arrêtée ne traîne plus
