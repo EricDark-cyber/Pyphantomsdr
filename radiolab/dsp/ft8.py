@@ -454,7 +454,11 @@ class FT8Decoder:
             seen.add(text)
             cs, freq, start = info[k]
             tones = self._tones_of(b)
-            out.append((text, self._snr(cs, tones, noise_sym), freq, start, tones))
+            # bruit mesuré AUTOUR du signal : aux bords du filtre du récepteur le bruit est plus faible
+            # qu'au milieu de la bande, et le rapport signal/bruit serait sinon sous-estimé
+            a, z = int(max(freq - 200.0, 0.0) / self.df), int(min(freq + 250.0, self.fs / 2) / self.df)
+            local = np.percentile(np.abs(X[a:z]) ** 2, 25) / 0.2877 + 1e-30 if z - a > 100 else noise_x
+            out.append((text, self._snr(cs, tones, SPS * min(local, noise_x) / self.n_d), freq, start, tones))
         return out
 
     # ---------------------------------------------------------------- 1 et 2 : candidats
@@ -529,10 +533,16 @@ class FT8Decoder:
 
     # ---------------------------------------------------------------- 4 : vraisemblances des bits
     def _bit_metrics(self, cs):
-        """Pour chaque bit : (meilleure tonalité où il vaut 1) - (meilleure tonalité où il vaut 0)."""
+        """Pour chaque bit : (meilleure tonalité où il vaut 1) - (meilleure tonalité où il vaut 0).
+
+        Deux jeux de mesures, essayés l'un après l'autre :
+          - les amplitudes telles quelles : le mieux quand le signal est stable ;
+          - chaque symbole ramené à sa tonalité la plus forte : le mieux quand le niveau change
+            pendant la trame (évanouissement, émission commencée en retard), car les passages
+            faibles mais lisibles gardent alors tout leur poids."""
         mag = np.abs(cs[self.data_pos])[:, self.gray]                  # rangé par valeur des bits
         out = []
-        for m in (mag, mag ** 2):
+        for m in (mag, mag / (mag.max(axis=1, keepdims=True) + 1e-30)):
             bm = np.stack([m[:, s].max(axis=1) - m[:, ~s].max(axis=1) for s in self.bit_sets], axis=1).ravel()
             sd = bm.std()
             if sd > 0:
