@@ -73,9 +73,9 @@ FT4_RVEC = [int(b) for b in "".join(format(x, "08b") for x in
 
 SPS = 32                      # échantillons par symbole après retour autour de 0 Hz
 HOP_S = 2.0                   # une analyse toutes les 2 s
-MAX_CANDIDATES = 80
+MAX_CANDIDATES = 160
 MAX_PASSES = 3                # passes successives, en retirant à chaque fois les signaux décodés
-SYNC_MIN = 1.5                # pic de synchronisation minimal, par rapport au niveau courant de la bande
+SYNC_MIN = 1.2                # pic de synchronisation minimal, par rapport au niveau courant de la bande
 
 
 def _mode_params(name):
