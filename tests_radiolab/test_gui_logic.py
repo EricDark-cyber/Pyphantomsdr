@@ -12,6 +12,7 @@ import fakeqt
 FileDialog, MessageBox = fakeqt.install()
 from radiolab import gui                                    # noqa: E402
 from radiolab.radio import Radio, load_config               # noqa: E402
+from radiolab.dsp.receiver import Receiver                   # noqa: E402
 from radiolab.sources.airspy import AirspySource            # noqa: E402
 from test_radio import make_iq_file                         # noqa: E402
 
@@ -767,3 +768,39 @@ def test_new_decoders_in_gui(window, tmp_path):
     win.update_info()
     assert win.picture().shape == (84, 420) and win.picture()[0, 0] == 0 and win.picture()[0, 400] == 255
     assert win.save_picture().endswith("_HELL.png")
+
+
+def test_ft8_display_in_gui(window):
+    """FT8 : update_info ne doit pas planter sur thr_db et doit alimenter la liste des messages."""
+    win = window
+    r = win.radio
+
+    class DummySource:
+        kind = "file"
+        sample_rate = 250_000.0
+        center_hz = 7_074_000.0
+        def start(self, cb): pass
+        def stop(self): pass
+        def close(self): pass
+
+    r.source = DummySource()
+    r.decimation = 1
+    r.rx = Receiver(250_000.0)
+    r.vfo_hz = 7_074_000.0
+    r.center_hz = r.vfo_hz - 30_000.0
+    r.rx.set_mode("USB")
+    r.rx.set_offset(30_000.0)
+    kinds = [it[1] for it in win.digi_kind.items]
+    win.digi_kind.setCurrentIndex(kinds.index("FT8"))
+    d = r.rx.digi
+    assert type(d).__name__ == "FT8Decoder"
+    called = []
+    d.on_timer = lambda: called.append(1)
+    win._log_ft8 = lambda *a, **k: None
+    win.ft8_list.verticalScrollBar = lambda: type("SB", (), {"value": lambda self: 0, "maximum": lambda self: 0})()
+    win.update_info()
+    assert called, "update_info doit appeler on_timer du decodeur FT8"
+    r.rx.digi_text.append("CQ F1ABC JN18  +12dB\n")
+    win.update_info()
+    assert win.ft8_list.count() == 1
+    assert not r.rx.digi_text

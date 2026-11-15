@@ -2499,9 +2499,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 top = float(np.percentile(levels, 99)) + 6
                 self.level_plot.setYRange(top - 50, top, padding=0)
                 self.level_plot.setXRange(0, d.history.maxlen, padding=0)
-            self.level_thr.setVisible(d.thr_db is not None)
-            if d.thr_db is not None:
-                self.level_thr.setValue(d.thr_db)
+            thr_db = getattr(d, "thr_db", None)
+            self.level_thr.setVisible(thr_db is not None)
+            if thr_db is not None:
+                self.level_thr.setValue(thr_db)
             if hasattr(d, "take_rows"):
                 self.update_picture(d)
             if hasattr(d, "points") and len(d.points) > 8:
