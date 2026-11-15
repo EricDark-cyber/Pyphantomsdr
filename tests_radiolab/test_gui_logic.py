@@ -803,4 +803,5 @@ def test_ft8_display_in_gui(window):
     r.rx.digi_text.append("CQ F1ABC JN18  +12dB\n")
     win.update_info()
     assert win.ft8_list.count() == 1
+    assert "CQ F1ABC JN18" in win.digi_out.text_
     assert not r.rx.digi_text

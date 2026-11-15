@@ -1791,8 +1791,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ft8_frame.setVisible(is_ft)
             if is_ft:
                 self.ft8_title.setText(f"{kind} Messages")
-        # Texte général : tout sauf FT8/FT4 et images
-        self.digi_out.setVisible(not is_ft and not is_image and not is_tetra)
+        # Texte de decodage (miroir aussi pour FT8/FT4)
+        self.digi_out.setVisible(not is_image and not is_tetra)
         # METAR / SIGMET : seulement si mode aviation ou aucun mode
         if hasattr(self, "metar_label"):
             self.metar_label.setVisible(show_aviation)
@@ -2484,9 +2484,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 at_bottom = sb.value() >= sb.maximum() - 5
                 if at_bottom:
                     self.ft8_list.scrollToBottom()
-            else:
-                self._digi_buf = (self._digi_buf + new)[-6000:]
-                self.digi_out.setPlainText(self._digi_buf)
+            self._digi_buf = (self._digi_buf + new)[-6000:]
+            self.digi_out.setPlainText(self._digi_buf)
             bar = self.digi_out.verticalScrollBar()
             bar.setValue(bar.maximum())
         d = rx.digi
