@@ -38,6 +38,7 @@ class FT8Decoder:
         self.buf = np.zeros(0, dtype=np.float32)
         self._offset = 0
         self.messages = []
+        self._last_emit_at = {}
         self.samples_received = 0
         self.last_snr = -99
         self.activity = False
@@ -54,6 +55,7 @@ class FT8Decoder:
             self.tone = FT8_TONE_HZ
             self.costas = FT8_COSTAS
         self.period = self.nsym * self.tsym
+        self.slot_s = 7.0 if mode == "FT4" else 15.0
 
     def process(self, audio):
         if audio is None or len(audio) == 0:
@@ -98,13 +100,19 @@ class FT8Decoder:
         bits = self._tones_to_bits(tones, sync_pos)
         soft = self._soft_llrs(tones, confs, sync_pos)
         msg = self._decode_bits(bits, soft)
-        if msg and msg not in self.messages[-6:]:
-            self.messages.append(msg)
-            if len(self.messages) > 40:
-                self.messages = self.messages[-30:]
-            if self.emit:
-                self.emit(msg + "\n")
-            return msg
+        if msg:
+            now = self.samples_received / self.fs if self.fs else 0.0
+            last = self._last_emit_at.get(msg)
+            if last is None or (now - last) >= 0.8 * self.slot_s:
+                self._last_emit_at[msg] = now
+                self.messages.append(msg)
+                if len(self.messages) > 40:
+                    self.messages = self.messages[-30:]
+                    keep = set(self.messages)
+                    self._last_emit_at = {k: v for k, v in self._last_emit_at.items() if k in keep}
+                if self.emit:
+                    self.emit(msg + "\n")
+                return msg
         return None
 
     def _decode_bits(self, bits, soft=None):

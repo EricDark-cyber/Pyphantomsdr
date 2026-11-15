@@ -2463,7 +2463,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                 km = haversine_km(my[0], my[1], coords[0], coords[1])
                                 dist_str = f"  [{w} {km:.0f} km]"
                                 break
-                    display = f"  {kind}     {ln}{dist_str}"
+                    display = f"{time.strftime('%H:%M:%S')}  {kind}  {ln}{dist_str}"
                     item = QtWidgets.QListWidgetItem(display)
                     item.setForeground(QtGui.QColor("#e2e8f0"))
                     # Stocker le locator pour le lien

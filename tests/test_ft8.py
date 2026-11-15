@@ -166,9 +166,36 @@ def test_audio_roundtrip() -> None:
     print("chaine audio -> bits -> LDPC ok (syndrome nul)")
 
 
+def test_repeated_frame_is_emitted_again() -> None:
+    """Deux trames identiques separees d'un slot (15 s) doivent etre emises deux fois."""
+    global FS
+    old_fs = FS
+    FS = 8_000
+    try:
+        H = build_H()
+        m77 = pack_standard("CQ", "F1ABC", grid="JN18")
+        m91 = np.array(add_crc14(m77), dtype=np.uint8)
+        cwd = encode_systematic(m91, H)
+        frame = synth_frame(cwd)
+        gap = np.zeros(int(FS * 15), dtype=np.float32)
+        stream = np.concatenate([frame, gap, frame, np.zeros(int(FS * 3), dtype=np.float32)])
+        got: list[str] = []
+        dec = FT8Decoder(FS, emit=got.append, mode="FT8", center=CENTER)
+        step = int(FS * 0.025)
+        for i in range(0, len(stream), step):
+            dec.process(stream[i:i + step])
+            if ((i // step) + 1) % 20 == 0:
+                dec.try_decode()
+        assert len(got) == 2, got
+        print(f"repetition ok : {len(got)} emissions pour 2 trames identiques separees d'un slot")
+    finally:
+        FS = old_fs
+
+
 if __name__ == "__main__":
     test_crc_vector()
     test_unpack_pack()
     test_ldpc_roundtrip()
     test_audio_roundtrip()
+    test_repeated_frame_is_emitted_again()
     print("Tous les tests FT8 passent.")
