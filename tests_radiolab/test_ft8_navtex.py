@@ -178,3 +178,21 @@ def test_navtex_in_noise_and_nothing_on_noise():
     for i in range(0, len(noise), 4096):
         d.process(noise[i:i + 4096])
     assert not out                                                         # une minute de bruit : aucun caractère
+
+
+def test_real_40m_slot():
+    """Une vraie période FT8 reçue sur 7,074 MHz (Airspy R2 + SpyVerter, 15 novembre 2026, 19 h 53 min 15 s UTC).
+
+    Elle contient deux pièges du monde réel : des stations à 3 Hz l'une de l'autre, et une
+    station (EA2KP, 600 Hz) dont l'émission a commencé en retard et monte de 15 dB pendant la
+    trame.  Cette dernière n'est décodée que grâce aux mesures ramenées symbole par symbole."""
+    path = os.path.join(os.path.dirname(__file__), "data", "ft8_40m_20261115_195315.wav")
+    with wave.open(path, "rb") as w:
+        fs = w.getframerate()
+        x = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float64) / 32768.0
+    d = decode("FT8", np.concatenate([np.zeros(int(2 * fs)), x]), fs)
+    texts = {m[0] for m in d.decodes}
+    assert len(texts) >= 20, sorted(texts)
+    assert {"US2YW EA2KP -17", "TA3MPK SP9NVY RR73", "CQ SQ3PMX JO72", "BG5GFU SQ9BSA -24", "VJ6X SP2KC JO93"} <= texts, sorted(texts)
+    by = {m[0]: m for m in d.decodes}
+    assert abs(by["TA3MPK SP9NVY RR73"][2] - by["CQ SQ3PMX JO72"][2]) < 6       # deux stations à quelques hertz d'écart
