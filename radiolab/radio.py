@@ -12,7 +12,8 @@ import threading
 import numpy as np
 from .dsp.receiver import Receiver, MODES
 from .dsp.filters import PolyDDC
-from .dsp.spectrum import power_spectrum_db, zoom_spectrum, auto_nfft, DEFAULT_WINDOW
+from .dsp.spectrum import (power_spectrum_db, zoom_spectrum, auto_nfft, zoom_fft, zoom_plan, zoom_raw_samples,
+                           DEFAULT_WINDOW)
 from .audio import Cf32Writer, NullAudio, WavWriter, recording_name, as_stereo
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".radiolab.json")
@@ -53,7 +54,7 @@ def allowed_decimations(source_rate):
 
 
 class Radio:
-    RING_SAMPLES = 1 << 20                                # 0,42 s à 2,5 MS/s : jusqu'à 2,4 Hz de finesse
+    RING_SAMPLES = 1 << 22                                # 1,7 s à 2,5 MS/s, 0,42 s à 10 MS/s : mémoire de la loupe du spectre
     HISTORY_BYTES = 512 * 1024 * 1024                     # mémoire maximale du TimeShift
 
     def __init__(self, audio_factory=None):
@@ -81,6 +82,7 @@ class Radio:
         self.running = False
         self.blocks = queue.Queue(maxsize=24)
         self.lost_blocks = 0
+        self.zoom_div = 0                           # réduction de débit de la loupe du spectre (0 = loupe inactive)
         self.iq_tap = None                          # fonction appelée avec chaque bloc I/Q (ADS-B)
         self.last_block = None
         self.ring = collections.deque()                   # derniers blocs I/Q, pour l'analyse fine du spectre
@@ -375,8 +377,16 @@ class Radio:
         if not fs or self.ring_len < 4096:
             return None
         available = min(self.ring_len, self.RING_SAMPLES)
-        if nfft is None:
-            nfft = auto_nfft(fs, f_hi - f_lo, npoints, available)
+        self.zoom_div = 0
+        if nfft is None:                                      # finesse automatique : la loupe dès que la bande regardée est étroite
+            n_raw = zoom_raw_samples(fs, f_hi - f_lo, npoints, available)
+            if n_raw:
+                view = zoom_fft(self.recent_iq(n_raw), fs, self.center_hz, f_lo, f_hi, npoints, window)
+                if view is not None:
+                    plan = zoom_plan(fs, f_hi - f_lo)
+                    self.zoom_div = plan[0] * plan[1]
+                    return view
+            nfft = auto_nfft(fs, f_hi - f_lo, npoints, min(available, 1 << 20))
         while nfft > 4096 and nfft > available:
             nfft >>= 1
         iq = self.recent_iq(max(nfft, min(available, 1 << 18)))

@@ -2395,8 +2395,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.img.setImage(self.wf, autoLevels=False, levels=self.waterfall_levels())
         self.img.setRect(QtCore.QRectF(x0, 0, x1 - x0, WF_ROWS))
         if self._ticks % 5 == 0:
-            self.fft_info.setText("%s Hz par point (FFT de %s points, %.0f ms de signal)" % (
-                ("%.1f" % self.resolution_hz).replace(".", ","), "{:,}".format(nfft).replace(",", " "), 1000.0 * nfft / fs))
+            fine = ("%.2f" if self.resolution_hz < 10 else "%.1f") % self.resolution_hz
+            if getattr(r, "zoom_div", 0):                    # loupe : débit réduit autour de la bande regardée
+                self.fft_info.setText("Finesse %s Hz (loupe : débit divisé par %d, %.0f ms de signal)" % (
+                    fine.replace(".", ","), r.zoom_div, 1000.0 * nfft / fs))
+            else:
+                self.fft_info.setText("%s Hz par point (FFT de %s points, %.0f ms de signal)" % (
+                    fine.replace(".", ","), "{:,}".format(nfft).replace(",", " "), 1000.0 * nfft / fs))
         dbm = r.rx.level_db + self.s_cal.value()
         s_text, s_part = s_units(dbm, vhf=r.vfo_hz > 30e6)
         self.s_bar.setValue(int(round(1000 * s_part)))
