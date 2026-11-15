@@ -94,7 +94,8 @@ def test_continuous_listening_no_duplicates_and_nothing_on_noise():
     d.flush()
     texts = sorted(m[0] for m in d.decodes)
     assert texts == sorted(["CQ DL1XYZ JO62"] * 3 + ["CQ F1ABC JN18", "CQ F4XYZ JN18", "CQ F5KLM JN18"]), texts
-    assert len(out) == 6 and all(o.endswith("\n") for o in out)
+    assert all(o.endswith("\n") for o in out)
+    assert ["sep" if o.startswith("──") else "msg" for o in out] == ["msg", "msg", "sep", "msg", "msg", "sep", "msg", "msg"]
     assert "message" in d.status()
     assert not decode("FT8", scene("FT8", [], 0, 90.0, seed=7)).decodes        # du bruit seul : rien
 

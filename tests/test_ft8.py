@@ -102,7 +102,7 @@ def test_unpack_pack() -> None:
     m77b = pack_standard("F1ABC", "K1ABC", ir=1, report=-12)
     assert unpack_ft8(m77b) == "F1ABC K1ABC R-12", unpack_ft8(m77b)
     m77c = pack_standard("F1ABC", "K1ABC", ir=0, report=7)
-    assert unpack_ft8(m77c) == "F1ABC K1ABC +7", unpack_ft8(m77c)
+    assert unpack_ft8(m77c) == "F1ABC K1ABC +07", unpack_ft8(m77c)   # deux chiffres, comme WSJT-X
     m77d = pack_standard("F1ABC", "K1ABC", ir=0, report=-41)
     assert unpack_ft8(m77d) == "F1ABC K1ABC -41", unpack_ft8(m77d)
     print("unpack/pack ok (CQ grid, report R+/- avec wrap, report negatif)")
@@ -128,16 +128,25 @@ def test_ldpc_roundtrip() -> None:
 
 
 def test_audio_roundtrip() -> None:
+    """La trame fabriquée ICI (codage indépendant du décodeur : résolution de H sur GF(2)) est décodée,
+    en mode synchrone (emit=None, comme le worker de l'ancienne interface)."""
     H = build_H()
     m77 = pack_standard("CQ", "F1ABC", grid="JN18")
     m91 = np.array(add_crc14(m77), dtype=np.uint8)
     cwd = encode_systematic(m91, H)
     audio = synth_frame(cwd)
 
+    # le codeur du décodeur (ft8.encode_tones) et celui de cet essai donnent le même mot de code
+    from radiolab.dsp import ft8 as new_ft8
+    tones = new_ft8.encode_tones(m77)
+    data = [t for k, t in enumerate(tones) if not (k < 7 or 36 <= k < 43 or k >= 72)]
+    bits = [b for t in data for b in ((GRAY[t] >> 2) & 1, (GRAY[t] >> 1) & 1, GRAY[t] & 1)]
+    assert np.array_equal(np.array(bits), cwd)
+
     dec = FT8Decoder(FS, emit=None, mode="FT8", center=CENTER)
     step = int(FS * 0.025)  # blocs de 25 ms comme le worker
     rng = np.random.default_rng(9)
-    stream = np.concatenate([audio, 0.02 * rng.standard_normal(int(FS * 3)).astype(np.float32)])
+    stream = np.concatenate([audio, 0.02 * rng.standard_normal(int(FS * 7)).astype(np.float32)])
     got = []
     for i in range(0, len(stream), step):
         dec.process(stream[i:i + step])
@@ -147,23 +156,9 @@ def test_audio_roundtrip() -> None:
                 got.append(msg)
     assert got, "aucun message decode en streaming"
     assert any("CQ F1ABC JN18" in g for g in got), f"messages: {got}"
+    text, snr, freq, start = dec.decodes[0]
+    assert text == "CQ F1ABC JN18" and abs(freq - CENTER) < 1.0 and abs(start) < 0.1
     print(f"streaming ok : {got[0]!r} decode (attendu 'CQ F1ABC JN18 ...')")
-
-    # verification intermediaire : tons -> bits (decodeur frais, trame alignee)
-    dec0 = FT8Decoder(FS, emit=None, mode="FT8", center=CENTER)
-    dec0.process(audio)
-    frame_len = int(FS * dec0.period)
-    chunk = dec0.buf[-frame_len:]
-    tones, _confs = dec0._detect_tones(chunk)
-    sync = dec0._find_costas(tones)
-    assert sync is not None, "Costas non trouve"
-    bits = dec0._tones_to_bits(tones, sync)
-    match = np.mean(np.asarray(bits[:174]) == cwd)
-    print(f"tons->bits : {match*100:.1f}% de bits corrects (attendu ~100%)")
-    assert match > 0.95
-    hard = dec0.ldpc.decode([1.0 if b == 0 else -1.0 for b in bits[:174]])
-    assert np.all((H @ hard) % 2 == 0)
-    print("chaine audio -> bits -> LDPC ok (syndrome nul)")
 
 
 def test_repeated_frame_is_emitted_again() -> None:
@@ -177,8 +172,8 @@ def test_repeated_frame_is_emitted_again() -> None:
         m91 = np.array(add_crc14(m77), dtype=np.uint8)
         cwd = encode_systematic(m91, H)
         frame = synth_frame(cwd)
-        gap = np.zeros(int(FS * 15), dtype=np.float32)
-        stream = np.concatenate([frame, gap, frame, np.zeros(int(FS * 3), dtype=np.float32)])
+        gap = np.zeros(int(FS * 15) - len(frame), dtype=np.float32)
+        stream = np.concatenate([frame, gap, frame, np.zeros(int(FS * 8), dtype=np.float32)])
         got: list[str] = []
         dec = FT8Decoder(FS, emit=got.append, mode="FT8", center=CENTER)
         step = int(FS * 0.025)
@@ -186,8 +181,12 @@ def test_repeated_frame_is_emitted_again() -> None:
             dec.process(stream[i:i + step])
             if ((i // step) + 1) % 20 == 0:
                 dec.try_decode()
-        assert len(got) == 2, got
-        print(f"repetition ok : {len(got)} emissions pour 2 trames identiques separees d'un slot")
+                dec.wait()                      # l'essai va plus vite que le temps reel
+        dec.flush()
+        lines = [g for g in got if "CQ F1ABC JN18" in g]
+        assert len(lines) == 2, got
+        assert sum(g.startswith("──") for g in got) == 1, got          # une ligne de separation entre les deux periodes
+        print(f"repetition ok : {len(lines)} emissions pour 2 trames identiques separees d'un slot")
     finally:
         FS = old_fs
 

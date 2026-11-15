@@ -291,7 +291,7 @@ class CWDecoder:
             self.spaced = True
 
 
-KINDS = ("RTTY45", "RTTY50", "PSK31", "PSK63", "CW", "PACKET300", "APRS1200", "NAVTEX", "FAX", "SSTV", "WSPR", "FT8", "FT4", "GOLAY", "HELL", "DCF77", "ALS162")
+KINDS = ("RTTY45", "RTTY50", "PSK31", "PSK63", "CW", "PACKET300", "APRS1200", "AIS", "ACARS", "NAVTEX", "FAX", "SSTV", "WSPR", "FT8", "FT4", "GOLAY", "HELL", "DCF77", "ALS162")
 
 
 def _audio_decoder(dec, emit):
@@ -323,6 +323,12 @@ def make_decoder(kind, fs, center, emit, mark_high=True):
         return RTTYDecoder(fs, center, 50.0, emit, mark_high)
     if kind == "CW":
         return CWDecoder(fs, center, emit)
+    if kind == "AIS":                             # navires : signal pris en sortie du démodulateur FM
+        from .ais import AISDecoder, format_ais
+        return AISDecoder(fs, lambda m: emit(format_ais(m) + "\n"))
+    if kind == "ACARS":                           # avions : audio AM
+        from .acars import ACARSDecoder, format_acars
+        return ACARSDecoder(fs, lambda m: emit(format_acars(m) + "\n"))
     if kind == "NAVTEX":                          # le sens des deux fréquences est trouvé automatiquement
         from .navtex import NAVTEXDecoder
         return _audio_decoder(NAVTEXDecoder(fs, center, emit), emit)

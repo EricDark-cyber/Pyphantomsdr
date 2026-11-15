@@ -1,6 +1,7 @@
-"""Décodage étendu des messages Mode S (tous les principaux DF).
+"""Champs des messages Mode S selon leur format (DF) : altitude et code transpondeur.
 
-Complète le décodeur ADS-B avec les formats de surveillance et d'identité.
+Position des champs (bits numérotés à partir de 1) : DF 1-5 ; pour les formats 0, 4, 5, 16, 20
+et 21, le champ de 13 bits (altitude AC ou identité ID) occupe les bits 20 à 32.
 """
 import collections
 
@@ -19,76 +20,64 @@ DF_NAMES = {
 }
 
 
+def decode_ac13(ac):
+    """Champ altitude de 13 bits -> pieds, ou None (pas d'altitude, mètres, ou ancien codage par 100 pieds)."""
+    if ac == 0 or (ac >> 6) & 1 or not (ac >> 4) & 1:        # bit M (mètres) ou bit Q absent
+        return None
+    n = ((ac & 0x1F80) >> 2) | ((ac & 0x20) >> 1) | (ac & 0xF)
+    return n * 25 - 1000
+
+
+def decode_id13(idf):
+    """Champ identité de 13 bits -> code transpondeur de 4 chiffres (0 à 7).
+    Les bits sont entrelacés : C1 A1 C2 A2 C4 A4 X B1 D1 B2 D2 B4 D4."""
+    a = ((idf >> 7) & 1) * 4 + ((idf >> 9) & 1) * 2 + ((idf >> 11) & 1)
+    b = ((idf >> 1) & 1) * 4 + ((idf >> 3) & 1) * 2 + ((idf >> 5) & 1)
+    c = ((idf >> 8) & 1) * 4 + ((idf >> 10) & 1) * 2 + ((idf >> 12) & 1)
+    d = (idf & 1) * 4 + ((idf >> 2) & 1) * 2 + ((idf >> 4) & 1)
+    return "%d%d%d%d" % (a, b, c, d)
+
+
 def decode_mode_s(msg):
     """Enrichit un message Mode S décodé avec les champs selon son DF."""
     df = msg.get("df")
     raw = msg.get("raw", "")
     if not raw or df is None:
         return msg
-
     try:
         data = int(raw, 16)
     except ValueError:
         return msg
-
     msg["df_name"] = DF_NAMES.get(df, f"DF{df}")
     bits = msg.get("bits", 56)
-
+    if bits < 32:
+        return msg
+    field = (data >> (bits - 32)) & 0x1FFF                   # bits 20 à 32
     if df in (0, 4, 16, 20):
-        # Altitude
-        msg["altitude"] = _extract_altitude(data, bits)
+        msg["altitude"] = decode_ac13(field)
     if df in (5, 21):
-        # Identity / Squawk
-        msg["squawk"] = _extract_squawk(data, bits)
+        msg["squawk"] = decode_id13(field)
     if df == 11:
-        # All-call : adresse ICAO déjà extraite
-        msg["ca"] = (data >> (bits - 8)) & 0x7 if bits >= 8 else None
-    if df in (17, 18):
-        # Déjà géré par decode_adsb_payload
-        pass
-
+        msg["ca"] = (data >> (bits - 8)) & 0x7
     return msg
 
 
 def _extract_altitude(data, bits):
-    """Extrait l'altitude des messages de surveillance (AC field)."""
-    if bits < 32:
-        return None
-    # AC field : 13 bits, position dépend du format
-    ac = (data >> (bits - 32 + 8)) & 0x1FFF   # approximation courante
-    if ac == 0:
-        return None
-    # Décodage Gillham / simple
-    m = ac & 0x7F
-    q = (ac >> 4) & 1
-    if q:
-        n = ((ac & 0x0FE0) >> 1) | (ac & 0x000F)
-        return n * 25 - 1000
-    return None
+    return decode_ac13((data >> (bits - 32)) & 0x1FFF) if bits >= 32 else None
 
 
 def _extract_squawk(data, bits):
-    """Extrait le code squawk (Mode A) des messages d'identité."""
-    if bits < 32:
-        return None
-    id_field = (data >> (bits - 32 + 8)) & 0x1FFF
-    # Conversion en octal 4 chiffres
-    a = (id_field >> 9) & 7
-    b = (id_field >> 6) & 7
-    c = (id_field >> 3) & 7
-    d = id_field & 7
-    return f"{a}{b}{c}{d}"
+    return decode_id13((data >> (bits - 32)) & 0x1FFF) if bits >= 32 else None
 
 
 class ModeSDecoder:
-    """Décodeur Mode S étendu (tous DF)."""
+    """Compte et garde les messages Mode S, tous formats."""
 
     def __init__(self):
         self.messages = collections.deque(maxlen=500)
         self.by_df = collections.defaultdict(int)
 
     def process(self, msg):
-        """Enrichit et stocke un message."""
         msg = decode_mode_s(msg)
         self.messages.append(msg)
         df = msg.get("df")

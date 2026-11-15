@@ -805,3 +805,70 @@ def test_ft8_display_in_gui(window):
     assert win.ft8_list.count() == 1
     assert "CQ F1ABC JN18" in win.digi_out.text_
     assert not r.rx.digi_text
+
+
+def test_avions_navires_in_gui(window):
+    """AIS et ACARS passent par le menu des décodeurs, l'ADS-B reçoit tous les blocs I/Q,
+    « RR73 » n'est pas pris pour un locator, et les périodes FT8 sont séparées."""
+    from radiolab import gui
+    assert gui.find_locator("K1ABC F1ABC RR73  -05dB  1000Hz") is None
+    assert gui.find_locator("CQ F1ABC JN18  -05dB  1000Hz") == "JN18"
+    assert gui.find_locator("CQ DL1XYZ") is None and gui.find_locator("<PA3XYZ> G4ABC IO91NP") == "IO91NP"
+    win = window
+    r = win.radio
+
+    class DummySource:
+        kind = "file"
+        sample_rate = 250_000.0
+        center_hz = 161_945_000.0
+        def start(self, cb): pass
+        def stop(self): pass
+        def close(self): pass
+
+    r.source = DummySource()
+    r.decimation = 1
+    r.rx = Receiver(250_000.0)
+    r.vfo_hz = 161_975_000.0
+    r.center_hz = r.vfo_hz - 30_000.0
+    r.rx.set_offset(30_000.0)
+    kinds = [it[1] for it in win.digi_kind.items]
+    assert {"AIS", "ACARS"} <= set(kinds)
+    labels = dict((it[1], it[0]) for it in win.digi_kind.items)
+    assert "ébauche" in labels["JS8"] and "ébauche" in labels["JT65"] and "ébauche" in labels["OLIVIA"]
+
+    r.rx.set_mode("NFM")
+    win.ais_on.setChecked(True)                               # la case AIS est un raccourci vers le menu
+    assert win.digi_kind.currentData() == "AIS" and type(r.rx.digi).__name__ == "AISDecoder"
+    r.rx.digi.vessels[227006760] = {"mmsi": 227006760, "lat": 49.4421, "lon": 0.1073}
+    r.rx.digi_text.append("AIS  1  MMSI 227006760  49.4421°N 0.1073°E  12.3 nd\n")
+    win.update_info()
+    assert win.ais_list.count() == 1 and "227006760" in win.digi_out.text_
+    win.ais_on.setChecked(False)
+    assert win.digi_kind.currentData() is None and r.rx.digi is None
+
+    r.rx.set_mode("AM")
+    win.acars_on.setChecked(True)
+    assert win.digi_kind.currentData() == "ACARS" and type(r.rx.digi).__name__ == "ACARSDecoder"
+    r.rx.digi_text.append("ACARS  F-GKXA  étiquette H1  bloc 3  TEST\n")
+    win.update_info()
+    assert win.acars_list.count() == 1
+    win.acars_on.setChecked(False)
+
+    r.rx.set_mode("USB")
+    win.digi_kind.setCurrentIndex(kinds.index("FT8"))
+    win._log_ft8 = lambda *a, **k: None
+    win.ft8_list.verticalScrollBar = lambda: type("SB", (), {"value": lambda self: 0, "maximum": lambda self: 0})()
+    r.rx.digi_text.append("K1ABC F1ABC RR73  -05dB  1000Hz\n──────── période suivante ────────\nCQ F1ABC JN18  -05dB  1000Hz\n")
+    win.update_info()
+    assert win.ft8_list.count() == 3
+    win.digi_kind.setCurrentIndex(kinds.index(None))
+
+    win.adsb_on.setChecked(True)                              # ADS-B : le décodeur est branché sur les blocs I/Q de la radio
+    assert win.adsb is not None and r.iq_tap == win.adsb.feed
+    win.adsb._out.append({"df": 17, "icao": "4840D6", "df_name": "ADS-B Extended Squitter", "callsign": "KLM1023"})
+    win.adsb._out.append({"df": 11, "icao": "4840D6", "df_name": "All-Call Reply"})       # rien à afficher
+    for msg in win.adsb.take():                               # ce que fait l'horloge de l'interface à chaque tic
+        win._show_adsb(msg)
+    assert win.adsb_list.count() == 1 and "KLM1023" in win.adsb_list.rows[0]
+    win.adsb_on.setChecked(False)
+    assert win.adsb is None and r.iq_tap is None

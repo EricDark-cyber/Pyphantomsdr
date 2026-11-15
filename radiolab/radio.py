@@ -81,6 +81,7 @@ class Radio:
         self.running = False
         self.blocks = queue.Queue(maxsize=24)
         self.lost_blocks = 0
+        self.iq_tap = None                          # fonction appelée avec chaque bloc I/Q (ADS-B)
         self.last_block = None
         self.ring = collections.deque()                   # derniers blocs I/Q, pour l'analyse fine du spectre
         self.ring_len = 0
@@ -284,6 +285,12 @@ class Radio:
                         back = int(self.delay_s * self.sample_rate / max(len(block), 1))
                         block = self.history[max(len(self.history) - 1 - back, 0)]
                 self.last_block = block
+                tap = self.iq_tap
+                if tap is not None:
+                    try:
+                        tap(block)
+                    except Exception:
+                        pass
                 self.ring.append(block)
                 self.ring_len += len(block)
                 while self.ring_len - len(self.ring[0]) >= self.RING_SAMPLES:

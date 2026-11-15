@@ -213,7 +213,9 @@ class Receiver:
 
     def _make_digi(self):
         self.digi = None
-        wanted = ("NFM",) if self.digi_kind in ("APRS1200", "DMR", "DSTAR", "C4FM") else ("USB", "LSB", "CW")
+        wanted = ("NFM",) if self.digi_kind in ("APRS1200", "DMR", "DSTAR", "C4FM", "AIS") else ("USB", "LSB", "CW")
+        if self.digi_kind == "ACARS":                         # ACARS : en modulation d'amplitude
+            wanted = ("AM",)
         if self.digi_kind == "SSTV":                          # la SSTV existe aussi en FM (station spatiale, relais)
             wanted += ("NFM",)
         if self.mode == "TETRA":
@@ -221,7 +223,8 @@ class Receiver:
         elif self.digi_kind and self.mode in wanted:
             # en RTTY la fréquence de repos (mark) est la plus haute à l'antenne : en BLI elle devient la plus basse
             mark_high = (self.mode != "LSB") != self.digi_reverse
-            self.digi = make_decoder(self.digi_kind, self.fs2, self.digi_audio_center(),
+            fs = self.fs1 if self.digi_kind == "AIS" else self.fs2      # AIS : 9600 bits/s, avant réduction de débit
+            self.digi = make_decoder(self.digi_kind, fs, self.digi_audio_center(),
                                      self.digi_text.append, mark_high)
             if self.digi is not None and self.digi_kind == "CW":
                 self.digi.set_speed(self.cw_wpm)
@@ -404,6 +407,8 @@ class Receiver:
                 a = np.angle(zz[1:] * np.conj(zz[:-1])).astype(np.float32) * (self.fs1 / (2 * np.pi * dev))
                 if m == "WFM":
                     return self._wfm_audio(a)
+                if self.digi is not None and self.digi_kind == "AIS":       # trop rapide pour le débit audio
+                    self.digi.process(a)
                 a = self.post.process(a)
                 self.tones.process(a)
                 self.ctcss_hz = self.tones.tone
@@ -411,7 +416,7 @@ class Receiver:
                 self.dcs_label = self.dcs.label()
                 if self.pocsag_enabled:
                     self.pocsag.process(a)
-                if self.digi is not None:                    # APRS / packet 1200 bauds
+                if self.digi is not None and self.digi_kind != "AIS":       # APRS / packet 1200 bauds
                     self.digi.process(a)
                 if self.raw_output:
                     return self.resampler.process(np.clip(a * self.volume, -1.0, 1.0).astype(np.float32))
@@ -428,6 +433,8 @@ class Receiver:
                     if len(env):
                         self.dc += 0.1 * (float(env.mean()) - self.dc)
                     a = (env - self.dc).astype(np.float32)
+                    if self.digi is not None:                # ACARS
+                        self.digi.process(a)
                 else:                                        # BLU / CW : la partie réelle suffit,
                     a = (z.real * 2.0).astype(np.float32)    # le filtre a déjà supprimé l'autre bande
                     if self.digi is not None:
