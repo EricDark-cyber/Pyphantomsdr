@@ -34,11 +34,16 @@ def test_navtex_roundtrip_decoder_level():
     assert any(text in m for m in d.messages + msgs), (d.messages, msgs)
 
 
-def test_navtex_encode_weight_rule():
-    """Chaque mot de 7 bits émis a un poids de 3 ou 4 (code CCIR 476)."""
-    for w in navtex.encode("ZCZC 518 KHZ GALE WARNING NNNN"):
-        assert bin(w).count("1") in (3, 4)
-    assert len(navtex.encode("AB")) == 4           # chaque caractère est émis deux fois
+def test_navtex_encode_follows_ccir476():
+    """Code CCIR 476 : chaque mot a exactement 4 bits à 1, « A » vaut 1110001, et le second
+    exemplaire d'un caractère est émis cinq caractères après le premier."""
+    slots = navtex.encode("ZCZC 518 KHZ GALE WARNING NNNN")
+    assert all(bin(w).count("1") == 4 for w in slots)
+    assert navtex.ENCODE_LETTERS["A"] == 0b1110001 and navtex.ENCODE_FIGURES["3"] == navtex.ENCODE_LETTERS["E"]
+    slots = navtex.encode("AB")
+    a, b = navtex.ENCODE_LETTERS["A"], navtex.ENCODE_LETTERS["B"]
+    i = slots.index(a)
+    assert slots[i + 5] == a and slots[i + 2] == b and slots[i + 7] == b
 
 
 ALL_KINDS = list(KINDS) + ["JS8", "JT65", "M17", "DSTAR", "DMR", "C4FM", "OLIVIA", "CONTESTIA"]
