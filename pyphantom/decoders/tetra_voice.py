@@ -16,6 +16,7 @@ class TetraVoiceDecoder:
         self.fs = fs
         self.enabled = False
         self.decoder_path = None
+        self.last_error = None
         self._find_decoder()
         self.audio_buf = []
         self.frame_bits = 137  # bits par trame ACELP
@@ -84,14 +85,9 @@ class TetraVoiceDecoder:
         return None
 
     def _decode_simple(self, bits):
-        """Décodage simplifié (placeholder) : génère un signal basé sur les bits."""
-        # Sans codec réel, on génère un signal de test
-        # pour montrer que le pipeline fonctionne
-        t = np.arange(self.frame_samples) / self.fs
-        # Fréquence basée sur les premiers bits
-        freq = 200 + sum(bits[:8]) * 20
-        audio = 0.3 * np.sin(2 * np.pi * freq * t)
-        return audio.astype(np.float32)
+        """Pas de codec réel embarqué : on ne fabrique aucun faux audio."""
+        self.last_error = "codec ACELP non disponible (sdecoder/OpenACELP requis)"
+        return None
 
     def decode(self, bits):
         """Alias pour compatibilité."""

@@ -228,6 +228,11 @@ class TetraDecoder:
         self.bsch_ok = 0
         self.bsch_bad = 0
         self.cell = {}
+        self.timeslot = None
+        self.frame = None
+        self.multiframe = None
+        self.timeslot_filter = 0
+        self._missed = 0
         self.messages = []
         self._lock_sent = False
         self._cell_sent = None
@@ -344,6 +349,21 @@ class TetraDecoder:
         return score
 
     # ------------------------------------------------------------- salves
+    @staticmethod
+    def _find_train(b, start, end):
+        start = max(0, int(start))
+        end = min(int(end), len(b))
+        if end - start < 38:
+            return None
+        for tr in (TRAIN_SYNC, TRAIN_NORMAL_1, TRAIN_NORMAL_2):
+            L = len(tr)
+            w = np.lib.stride_tricks.sliding_window_view(b[start:end], L)
+            m = (w == tr).sum(axis=1)
+            cand = np.nonzero(m >= L - 1)[0]
+            if len(cand):
+                return start + int(cand[0])
+        return None
+
     def _scan_bursts(self):
         b = self._all_bits
         n = len(b)
@@ -392,12 +412,24 @@ class TetraDecoder:
                             self.bsch_bad += 1
                         else:
                             self.bsch_ok += 1
+                            self.timeslot = info["timeslot"]
+                            self.frame = info["frame"]
+                            self.multiframe = info["multiframe"]
                             key = (info["mcc"], info["mnc"], info["colour"])
                             if key != self._cell_sent:
                                 self._cell_sent = key
                                 self.cell = info
                                 self._emit("Cellule TETRA identifiée : pays %d, réseau %d, code couleur %d"
                                            % (info["mcc"], info["mnc"], info["colour"]))
+            if kind is None:
+                nxt = self._find_train(b, p + 1, min(n, p + 2 * BURST_BITS))
+                if nxt is not None:
+                    self._missed += 1
+                    self._next_train = nxt
+                    continue
+                self._missed += 1
+            else:
+                self._missed = 0
             self._next_train = p + BURST_BITS
 
     def _emit(self, text):
@@ -408,6 +440,14 @@ class TetraDecoder:
                 self.callback(line)
 
     # ---------------------------------------------------------------- état
+    def set_timeslot(self, ts):
+        """Filtre d'affichage du timeslot (0 = auto)."""
+        self.timeslot_filter = int(ts or 0)
+
+    def get_ts_bits(self):
+        """Derniers bits démodulés (pour l'affichage du panneau TETRA)."""
+        return self._all_bits[-BURST_BITS:] if len(self._all_bits) else np.zeros(0, dtype=np.int8)
+
     def status(self):
         if self.locked:
             c = self.cell

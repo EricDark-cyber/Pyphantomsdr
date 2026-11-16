@@ -1,7 +1,10 @@
 """TETRA, premier étage : démodulation pi/4-DQPSK et repérage des salves, sur un signal fabriqué."""
+import glob
+import os
 import numpy as np
 import pytest
 from radiolab.dsp.receiver import Receiver
+from radiolab.sources.iqfile import IQFileSource
 from radiolab.dsp.tetra import (TetraDecoder, rrc_taps, bits_to_phase_steps, TRAIN_NORMAL_1, TRAIN_NORMAL_2,
                                 TRAIN_SYNC, NORMAL_TRAIN_START, SYNC_TRAIN_START, BURST_BITS, BSCH_SCRAMBLING,
                                 BSCH_ORDER, decode_bsch, crc16_ok)
@@ -55,13 +58,13 @@ def tetra_bits(n_bursts, seed=0, cell=None):
     return np.concatenate(out), kinds
 
 
-def modulate(bits, freq_hz, snr_db=25.0, seed=1):
+def modulate(bits, freq_hz, snr_db=25.0, seed=1, drift_hz_s=0.0):
     phase = np.cumsum(bits_to_phase_steps(bits))
     up = np.zeros(len(phase) * SPS, dtype=np.complex128)
     up[::SPS] = np.exp(1j * phase)
     x = np.convolve(up, rrc_taps(SPS) * SPS, "same")
     t = np.arange(len(x)) / FS
-    x = 0.05 * x * np.exp(2j * np.pi * freq_hz * t)
+    x = 0.05 * x * np.exp(2j * np.pi * (freq_hz * t + 0.5 * drift_hz_s * t * t))
     r = np.random.default_rng(seed)
     sigma = np.sqrt(np.mean(np.abs(x) ** 2) * 10 ** (-snr_db / 10) * FS / 25000.0)   # SNR dans 25 kHz
     return (x + sigma * (r.standard_normal(len(x)) + 1j * r.standard_normal(len(x))) / np.sqrt(2)).astype(np.complex64)
@@ -152,3 +155,53 @@ def test_cell_identity_is_read_from_the_signal():
     assert "réseau 1001" in dec.status() and "trame" in dec.status()
     r = dec.burst_rates()
     assert 55 < r["normale 1"] + r["normale 2"] + r["synchro"] < 75      # environ 70 salves par seconde
+
+
+def test_resync_after_missed_bursts():
+    """Si quelques salves perdent leur mire, le décodeur doit se resynchroniser."""
+    bits, kinds = tetra_bits(140)
+    b = bits.copy()
+    for k in (12, 13, 14, 55, 56, 90, 91):
+        st = k * BURST_BITS
+        b[st + NORMAL_TRAIN_START:st + NORMAL_TRAIN_START + 38] = 0
+    rx = Receiver(FS); rx.set_mode("TETRA"); rx.set_offset(OFF)
+    run(rx, modulate(b, OFF + 150.0, 20.0))
+    dec = rx.digi
+    assert dec.locked
+    total = sum(dec.counts.values())
+    assert total >= 0.8 * len(kinds), (total, len(kinds))
+
+
+def test_survives_slow_frequency_drift():
+    bits, _ = tetra_bits(120)
+    rx = Receiver(FS); rx.set_mode("TETRA"); rx.set_offset(OFF)
+    run(rx, modulate(bits, OFF + 250.0, 18.0, drift_hz_s=25.0))
+    dec = rx.digi
+    assert dec.locked and dec.quality > 0.5 and abs(dec.freq_error_hz - (250.0 + 25.0 * (len(bits) / BURST_BITS * BURST_BITS / 18000.0 / 2))) < 120
+
+
+def test_real_tetra_recordings():
+    """Facultatif : TETRA_IQ_DIR=... TETRA_IQ_OFF=... (Hz) ; au moins un fichier doit verrouiller."""
+    folder = os.environ.get("TETRA_IQ_DIR")
+    if not folder:
+        pytest.skip("TETRA_IQ_DIR non défini")
+    paths = sorted(glob.glob(os.path.join(folder, "*.cf32")) + glob.glob(os.path.join(folder, "*.wav")))
+    if not paths:
+        pytest.skip("aucun enregistrement dans TETRA_IQ_DIR")
+    off = float(os.environ.get("TETRA_IQ_OFF", "0"))
+    locked = 0
+    for path in paths[:5]:
+        src = IQFileSource(path, loop=False, realtime=False)
+        try:
+            rx = Receiver(float(src.sample_rate)); rx.set_mode("TETRA"); rx.set_offset(off)
+        except ValueError:
+            src.close(); continue
+        while True:
+            blk = src.read(65536)
+            if blk is None or len(blk) == 0:
+                break
+            rx.process(blk)
+        if rx.digi is not None and rx.digi.locked:
+            locked += 1
+        src.close()
+    assert locked >= 1, "aucun verrou TETRA sur les enregistrements fournis"
