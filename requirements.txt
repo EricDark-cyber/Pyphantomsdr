@@ -1,0 +1,9 @@
+numpy>=1.24
+PySide6>=6.5
+pyqtgraph>=0.13
+sounddevice>=0.4.6
+# Backend Airspy R2 principal : ctypes sur airspy.dll (fournie a la racine du depot,
+# avec libusb-1.0.dll et pthreadVC2.dll) -> RIEN d'autre a installer.
+# Optionnel, autres recepteurs via SoapySDR : NE PAS faire "pip install SoapySDR"
+# (pas de roue Windows). Installez PothosSDR + venv Python 3.9 (.venv39), voir README.
+# Tests pytest du port RadioLab : pip install pytest
