@@ -393,9 +393,9 @@ class MainWindow(QtWidgets.QMainWindow):
         grid = QtWidgets.QGridLayout()
         self.tetra_mcc = QtWidgets.QLabel("MCC: —")
         self.tetra_mnc = QtWidgets.QLabel("MNC: —")
-        self.tetra_la = QtWidgets.QLabel("LA: —")
+        self.tetra_la = QtWidgets.QLabel("LA: — (BSCH seul)")
         self.tetra_color = QtWidgets.QLabel("Color: —")
-        self.tetra_main = QtWidgets.QLabel("Main: —")
+        self.tetra_main = QtWidgets.QLabel("Main: — (BSCH seul)")
         self.tetra_current = QtWidgets.QLabel("Current: —")
         grid.addWidget(self.tetra_mcc, 0, 0)
         grid.addWidget(self.tetra_main, 0, 1)
@@ -428,7 +428,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tetra_sds = QtWidgets.QTextEdit()
         self.tetra_sds.setReadOnly(True)
         self.tetra_sds.setMaximumHeight(80)
-        self.tetra_sds.setPlaceholderText("SDS et Packet Data...")
+        self.tetra_sds.setPlaceholderText("SDS / packet : non implémenté (BSCH seul)")
         sds_lay.addWidget(self.tetra_sds)
         tlay.addWidget(sds_box)
 
@@ -481,15 +481,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # Indicateurs
         ind = QtWidgets.QHBoxLayout()
         self.tetra_fer = QtWidgets.QLabel("FER 0Hz")
-        self.tetra_ber = QtWidgets.QLabel("BER 0.0%")
-        self.tetra_mer = QtWidgets.QLabel("MER 0.0%")
+        self.tetra_ber = QtWidgets.QLabel("Qualité —")
+        self.tetra_mer = QtWidgets.QLabel("BSCH —")
         ind.addWidget(self.tetra_fer)
         ind.addWidget(self.tetra_ber)
         ind.addWidget(self.tetra_mer)
         tlay.addLayout(ind)
 
         # Diagramme (placeholder)
-        self.tetra_diagram = QtWidgets.QLabel("Diagramme constellation")
+        self.tetra_diagram = QtWidgets.QLabel("Constellation : non affichée (décodeur BSCH)")
         self.tetra_diagram.setMinimumHeight(80)
         self.tetra_diagram.setStyleSheet("background: #0a0d11; border: 1px solid #2a323b;")
         self.tetra_diagram.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -1859,6 +1859,11 @@ class MainWindow(QtWidgets.QMainWindow):
             ts_lay.addWidget(self.tetra_ts)
             self.tetra_bits_label = QtWidgets.QLabel("Bits : 0")
             ts_lay.addWidget(self.tetra_bits_label)
+            rx0 = getattr(self.radio, "rx", None)
+            tv = getattr(rx0, "tetra_voice", None) if rx0 is not None else None
+            self.tetra_voice.setEnabled(bool(tv is not None and tv.available))
+            if tv is not None and not tv.available:
+                self.tetra_voice.setToolTip("Audio vocal ACELP indisponible : sdecoder/OpenACELP requis (aucun faux audio)")
             if hasattr(self, "digi_panel"):
                 self.digi_panel.layout().addWidget(self.tetra_ts_box)
     def on_cw_auto(self, *_):
@@ -2564,14 +2569,16 @@ class MainWindow(QtWidgets.QMainWindow):
                                     sd.play(audio, 8000, blocking=False)
                             except Exception:
                                 pass
-                    cell = getattr(d, "cell", None)
-                    if cell:
-                        self.tetra_mcc.setText(f"MCC:{cell.get('mcc', '—')}")
-                        self.tetra_mnc.setText(f"MNC:{cell.get('mnc', '—')}")
-                        self.tetra_color.setText(f"Color:{cell.get('colour', '—')}")
+                    cell = getattr(d, "cell", None) or {}
+                    self.tetra_mcc.setText(f"MCC:{cell.get('mcc', '—')}")
+                    self.tetra_mnc.setText(f"MNC:{cell.get('mnc', '—')}")
+                    self.tetra_color.setText(f"Color:{cell.get('colour', '—')}")
+                    self.tetra_la.setText("LA: — (BSCH seul)")
+                    self.tetra_main.setText("Main: — (BSCH seul)")
+                    self.tetra_current.setText(f"TS:{cell.get('timeslot', getattr(d, 'timeslot', '—'))} F:{cell.get('frame', getattr(d, 'frame', '—'))}")
                     self.tetra_fer.setText(f"FER {getattr(d, 'freq_error_hz', 0):+.0f}Hz")
-                    self.tetra_ber.setText(f"BER {100*(1-getattr(d, 'quality', 0)):.1f}%")
-                    self.tetra_mer.setText(f"MER {100*getattr(d, 'quality', 0):.1f}%")
+                    self.tetra_ber.setText(f"Qualité {100*getattr(d, 'quality', 0):.0f}%")
+                    self.tetra_mer.setText(f"BSCH ok/bad {getattr(d, 'bsch_ok', 0)}/{getattr(d, 'bsch_bad', 0)}")
                 self.digi_status.setText(d.status())
             elif rx.digi_kind == "CW":
                 self.digi_status.setText("Vitesse estimée : %.0f mots/min" % d.wpm())
